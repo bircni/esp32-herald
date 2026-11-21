@@ -1,0 +1,18 @@
+[package]
+name = "simulator"
+version.workspace = true
+edition.workspace = true
+description = "Runs the deskbuddy UI and HTTP API on the desktop"
+
+[dependencies]
+ui = { path = "../ui" }
+embedded-graphics = "0.8"
+embedded-graphics-simulator = "0.8"
+tiny_http = "0.12"
+ureq = "3"
+chrono = "0.4"
+serde = "1"
+serde_json = "1"
+
+[lints]
+workspace = true

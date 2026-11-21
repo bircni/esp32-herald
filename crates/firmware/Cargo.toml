@@ -1,0 +1,34 @@
+[package]
+name = "deskbuddy-firmware"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.82"
+
+[[bin]]
+name = "deskbuddy-firmware"
+harness = false # no host test harness on the target; logic tests live in crates/ui
+
+[profile.release]
+opt-level = "s"
+
+[profile.dev]
+debug = true
+opt-level = "z"
+
+[features]
+# For running in Espressif's QEMU, which has no WiFi radio and no touch
+# panel: skips networking and the touch calibration screen.
+qemu = []
+
+[dependencies]
+ui = { path = "../ui" }
+log = "0.4"
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+embedded-graphics = "0.8"
+mipidsi = "0.10"
+esp-idf-svc = "0.53"
+
+[build-dependencies]
+embuild = "0.33.5"

@@ -1,0 +1,300 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Deskbuddy</title>
+<style>
+  :root { color-scheme: light dark; --bg:#f4f1ea; --card:#fff; --fg:#1b1d21; --dim:#6b7078; --line:#ddd8ce; --accent:#0a84c6; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#111316; --card:#1c1f24; --fg:#f2f2f2; --dim:#8a8f98; --line:#2e333a; --accent:#35d0ff; } }
+  * { box-sizing: border-box; }
+  body { margin:0; padding:16px; background:var(--bg); color:var(--fg); font:16px/1.45 system-ui,sans-serif; }
+  main { max-width:560px; margin:0 auto; }
+  h1 { font-size:1.5rem; margin:.2em 0 .1em; }
+  h2 { font-size:1rem; margin:0 0 .8em; }
+  section { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:16px; margin:14px 0; }
+  label { display:block; font-size:.85rem; color:var(--dim); margin:.7em 0 .2em; }
+  input, select, button { font:inherit; color:inherit; }
+  input[type=text], input[type=password], input[type=number], select { width:100%; padding:.5em .6em; border:1px solid var(--line); border-radius:8px; background:var(--bg); }
+  input[type=range] { width:100%; }
+  input[type=color] { width:56px; height:36px; padding:0; border:1px solid var(--line); border-radius:8px; background:none; }
+  button { padding:.5em 1em; border:1px solid var(--line); border-radius:8px; background:var(--bg); cursor:pointer; }
+  button.primary { background:var(--accent); border-color:var(--accent); color:#000; font-weight:600; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  .row > * { flex:1 1 auto; }
+  .row > button { flex:0 0 auto; }
+  .dim { color:var(--dim); font-size:.85rem; }
+  #msg { min-height:1.4em; }
+  #msg.err { color:#d93a30; }
+  dl { display:grid; grid-template-columns:auto 1fr; gap:.2em 1em; margin:0; }
+  dt { color:var(--dim); } dd { margin:0; }
+  .items { list-style:none; margin:0 0 .6em; padding:0; }
+  .items li { display:flex; align-items:center; gap:.6em; padding:.35em 0; border-bottom:1px solid var(--line); }
+  .items li span.text { flex:1; }
+  .dot { width:.8em; height:.8em; border-radius:50%; flex:0 0 auto; }
+  .items button { padding:.2em .6em; }
+  label.check { display:inline-flex; gap:.3em; align-items:center; color:var(--fg); margin:0; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Deskbuddy</h1>
+  <p id="msg" class="dim" role="status"></p>
+
+  <section>
+    <h2>Now</h2>
+    <dl id="state"></dl>
+  </section>
+
+  <section id="token-box" hidden>
+    <h2>Access token</h2>
+    <p class="dim">This device asks for a token before it accepts changes.</p>
+    <div class="row"><input type="password" id="my-token" autocomplete="off"><button id="use-token">Use</button></div>
+  </section>
+
+  <section>
+    <h2>Feed</h2>
+    <p class="dim">Items shown on the home view. Other machines add them with <code>PUT /api/items/&lt;id&gt;</code>.</p>
+    <ul id="items" class="items"></ul>
+    <div class="row">
+      <div><label for="it-id">Id</label><input type="text" id="it-id" maxlength="32" placeholder="window.kitchen"></div>
+      <div><label for="it-color">Colour</label>
+        <select id="it-color"><option>red</option><option>yellow</option><option selected>blue</option><option>green</option><option>grey</option></select></div>
+    </div>
+    <label for="it-text">Text (up to 32 characters)</label>
+    <input type="text" id="it-text" maxlength="32">
+    <div class="row">
+      <div><label for="it-detail">Right side (optional, else the age)</label><input type="text" id="it-detail" maxlength="12"></div>
+      <div><label for="it-ttl">Remove after seconds (empty = never)</label><input type="number" id="it-ttl" min="1" max="604800"></div>
+    </div>
+    <p class="row"><button class="primary" id="it-send">Add / update</button><button id="it-clear">Remove all</button></p>
+  </section>
+
+  <section>
+    <h2>Settings</h2>
+    <div class="row">
+      <div><label for="s-theme">Display theme</label><select id="s-theme"><option>dark</option><option>light</option></select></div>
+      <div><label for="s-accent">Accent colour</label><input type="color" id="s-accent"></div>
+    </div>
+    <label for="s-brightness">Brightness <span id="s-brightness-out"></span></label>
+    <input type="range" id="s-brightness" min="5" max="100" step="5">
+    <label for="s-sleep">Sleep after (seconds without touch, 0 = never)</label>
+    <input type="number" id="s-sleep" min="0" max="86400">
+    <label><input type="checkbox" id="s-rotate"> Rotate through views on its own</label>
+    <div class="row">
+      <div><label for="s-rotate-secs">Seconds per view</label><input type="number" id="s-rotate-secs" min="5" max="3600"></div>
+      <div><label for="s-rotate-from">From</label><input type="time" id="s-rotate-from"></div>
+      <div><label for="s-rotate-until">Until</label><input type="time" id="s-rotate-until"></div>
+    </div>
+    <p class="dim">Same time in both fields: all day. Rotation waits a minute after you touch the screen.</p>
+    <div class="row" id="s-rotate-views"></div>
+    <label for="s-tz">Time zone</label>
+    <select id="s-tz"></select>
+    <input type="text" id="s-tz-custom" placeholder="POSIX TZ string" hidden>
+    <label for="s-city">Weather location</label>
+    <div class="row"><input type="text" id="s-city" placeholder="City"><button id="s-find">Find</button></div>
+    <p class="dim" id="s-place"></p>
+    <label for="s-token">Access token (optional, required for changes once set)</label>
+    <input type="text" id="s-token" maxlength="64" autocomplete="off">
+    <p><button class="primary" id="s-save">Save settings</button></p>
+  </section>
+
+  <section>
+    <h2>WiFi</h2>
+    <p class="dim">The device reconnects after saving. Only 2.4 GHz networks work.</p>
+    <label for="w-ssid">Network name</label><input type="text" id="w-ssid" maxlength="32" autocomplete="off">
+    <label for="w-pass">Password</label><input type="password" id="w-pass" maxlength="63" autocomplete="off">
+    <p><button id="w-save">Save WiFi</button></p>
+  </section>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const ZONES = {
+  "Europe/Berlin": "CET-1CEST,M3.5.0,M10.5.0/3",
+  "Europe/London": "GMT0BST,M3.5.0/1,M10.5.0",
+  "Europe/Helsinki": "EET-2EEST,M3.5.0/3,M10.5.0/4",
+  "UTC": "UTC0",
+  "America/New_York": "EST5EDT,M3.2.0,M11.1.0",
+  "America/Chicago": "CST6CDT,M3.2.0,M11.1.0",
+  "America/Denver": "MST7MDT,M3.2.0,M11.1.0",
+  "America/Los_Angeles": "PST8PDT,M3.2.0,M11.1.0",
+  "America/Sao_Paulo": "<-03>3",
+  "Asia/Dubai": "<+04>-4",
+  "Asia/Kolkata": "IST-5:30",
+  "Asia/Shanghai": "CST-8",
+  "Asia/Tokyo": "JST-9",
+  "Australia/Sydney": "AEST-10AEDT,M10.1.0,M4.1.0/3",
+  "Pacific/Auckland": "NZST-12NZDT,M9.5.0,M4.1.0/3"
+};
+const VIEWS = ["home", "face", "forecast", "calendar"];
+const DOTS = { red: "#ff5a4f", yellow: "#ffc42e", blue: "#4a9bff", green: "#3dd68c", grey: "#8a8f98" };
+let place = { location: "", latitude: 0, longitude: 0 };
+let token = "";
+try { token = localStorage.getItem("buddy-token") || ""; } catch (e) {}
+
+function say(text, isError) {
+  $("msg").textContent = text;
+  $("msg").className = isError ? "err" : "dim";
+}
+
+async function api(method, path, body) {
+  const headers = {};
+  if (token) headers["X-Buddy-Token"] = token;
+  if (body !== undefined) headers["Content-Type"] = "application/json";
+  const res = await fetch(path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+  const data = await res.json().catch(() => ({}));
+  if (res.status === 401) $("token-box").hidden = false;
+  if (!res.ok) throw new Error(data.error || ("HTTP " + res.status));
+  return data;
+}
+
+async function run(what, fn) {
+  try { await fn(); say(what + ": done"); refresh(); }
+  catch (e) { say(what + " failed: " + e.message, true); }
+}
+
+function age(s) {
+  const m = Math.floor(s / 60);
+  if (m < 1) return "now";
+  if (m < 60) return m + "m";
+  if (m < 1440) return Math.floor(m / 60) + "h " + String(m % 60).padStart(2, "0") + "m";
+  return Math.floor(m / 1440) + "d " + Math.floor(m % 1440 / 60) + "h";
+}
+
+function showItems(items) {
+  const ul = $("items");
+  ul.textContent = "";
+  if (!items.length) {
+    const li = document.createElement("li"); li.className = "dim"; li.textContent = "Nothing in the feed.";
+    ul.append(li);
+  }
+  for (const it of items) {
+    const li = document.createElement("li");
+    const dot = document.createElement("span"); dot.className = "dot"; dot.style.background = DOTS[it.color];
+    const text = document.createElement("span"); text.className = "text"; text.textContent = it.text;
+    const right = document.createElement("span"); right.className = "dim"; right.textContent = it.detail || age(it.age_s);
+    const del = document.createElement("button"); del.textContent = "Remove"; del.title = it.id;
+    del.onclick = () => run("Remove", () => api("DELETE", "/api/items/" + encodeURIComponent(it.id)));
+    li.append(dot, text, right, del);
+    ul.append(li);
+  }
+}
+
+function showState(s) {
+  const rows = [
+    ["Time", s.time || "not set"],
+    ["Network", s.net.state + (s.net.ip ? " (" + s.net.ip + ")" : "") + (s.net.ssid ? " (" + s.net.ssid + ")" : "")],
+    ["View", s.view + (s.asleep ? ", asleep" : "")],
+    ["Rotation", s.rotate ? "on" : "off"],
+    ["Weather", s.weather ? Math.round(s.weather.temp_c) + " °C, " + s.weather.condition : "none"],
+    ["Firmware", s.version]
+  ];
+  const dl = $("state");
+  dl.textContent = "";
+  for (const [k, v] of rows) {
+    const dt = document.createElement("dt"); dt.textContent = k;
+    const dd = document.createElement("dd"); dd.textContent = v;
+    dl.append(dt, dd);
+  }
+  if (s.token_required && !token) $("token-box").hidden = false;
+  showItems(s.items);
+}
+
+async function refresh() {
+  try { showState(await api("GET", "/api/state")); } catch (e) { say("Device not reachable", true); }
+}
+
+function showSettings(s) {
+  $("s-theme").value = s.theme;
+  $("s-accent").value = s.accent_color.toLowerCase();
+  $("s-brightness").value = s.brightness;
+  $("s-brightness-out").textContent = s.brightness + "%";
+  $("s-sleep").value = s.sleep_secs;
+  $("s-rotate").checked = s.rotate;
+  $("s-rotate-secs").value = s.rotate_secs;
+  $("s-rotate-from").value = s.rotate_from;
+  $("s-rotate-until").value = s.rotate_until;
+  for (const v of VIEWS) $("s-rv-" + v).checked = s.rotate_views.includes(v);
+  $("s-token").value = s.token;
+  const known = Object.keys(ZONES).find(k => ZONES[k] === s.timezone);
+  $("s-tz").value = known || "custom";
+  $("s-tz-custom").hidden = !!known;
+  $("s-tz-custom").value = s.timezone;
+  place = { location: s.location, latitude: s.latitude, longitude: s.longitude };
+  $("s-city").value = s.location;
+  showPlace();
+}
+
+function showPlace() {
+  $("s-place").textContent = place.location
+    ? place.location + " (" + place.latitude.toFixed(2) + ", " + place.longitude.toFixed(2) + ")"
+    : "No location: the weather view stays empty.";
+}
+
+async function loadSettings() {
+  try { showSettings(await api("GET", "/api/settings")); }
+  catch (e) { say("Could not load settings: " + e.message, true); }
+}
+
+for (const v of VIEWS) {
+  const label = document.createElement("label"); label.className = "check";
+  const box = document.createElement("input"); box.type = "checkbox"; box.id = "s-rv-" + v;
+  label.append(box, v);
+  $("s-rotate-views").append(label);
+}
+for (const name of Object.keys(ZONES)) $("s-tz").add(new Option(name, name));
+$("s-tz").add(new Option("Custom POSIX string", "custom"));
+$("s-tz").onchange = () => { $("s-tz-custom").hidden = $("s-tz").value !== "custom"; };
+$("s-brightness").oninput = () => { $("s-brightness-out").textContent = $("s-brightness").value + "%"; };
+
+$("s-find").onclick = () => run("Location search", async () => {
+  const name = $("s-city").value.trim();
+  if (!name) { place = { location: "", latitude: 0, longitude: 0 }; showPlace(); return; }
+  // Runs in your browser, not on the device.
+  const res = await fetch("https://geocoding-api.open-meteo.com/v1/search?count=1&name=" + encodeURIComponent(name));
+  const hit = ((await res.json()).results || [])[0];
+  if (!hit) throw new Error("no place called " + name);
+  place = { location: hit.name.slice(0, 40), latitude: hit.latitude, longitude: hit.longitude };
+  $("s-city").value = place.location;
+  showPlace();
+});
+
+$("s-save").onclick = () => run("Save", async () => {
+  const tz = $("s-tz").value === "custom" ? $("s-tz-custom").value.trim() : ZONES[$("s-tz").value];
+  const newToken = $("s-token").value.trim();
+  const saved = await api("PUT", "/api/settings", {
+    theme: $("s-theme").value, accent_color: $("s-accent").value,
+    brightness: Number($("s-brightness").value), sleep_secs: Number($("s-sleep").value),
+    rotate: $("s-rotate").checked, rotate_secs: Number($("s-rotate-secs").value),
+    rotate_from: $("s-rotate-from").value || "00:00", rotate_until: $("s-rotate-until").value || "00:00",
+    rotate_views: VIEWS.filter(v => $("s-rv-" + v).checked),
+    timezone: tz, token: newToken, ...place
+  });
+  token = newToken;
+  try { localStorage.setItem("buddy-token", token); } catch (e) {}
+  showSettings(saved);
+});
+
+$("use-token").onclick = () => {
+  token = $("my-token").value.trim();
+  try { localStorage.setItem("buddy-token", token); } catch (e) {}
+  $("token-box").hidden = true;
+  loadSettings();
+};
+
+$("it-send").onclick = () => run("Feed", () => {
+  const id = $("it-id").value.trim();
+  if (!id) throw new Error("an id is needed, e.g. window.kitchen");
+  const body = { text: $("it-text").value, color: $("it-color").value, detail: $("it-detail").value };
+  if ($("it-ttl").value) body.ttl = Number($("it-ttl").value);
+  return api("PUT", "/api/items/" + encodeURIComponent(id), body);
+});
+$("it-clear").onclick = () => run("Remove all", () => api("DELETE", "/api/items"));
+$("w-save").onclick = () => run("WiFi", () => api("POST", "/api/wifi", { ssid: $("w-ssid").value, password: $("w-pass").value }));
+
+loadSettings();
+refresh();
+setInterval(refresh, 2000);
+</script>
+</body>
+</html>

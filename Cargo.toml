@@ -1,0 +1,13 @@
+[workspace]
+resolver = "2"
+members = ["crates/ui", "crates/simulator"]
+# The firmware targets xtensa-esp32-espidf with its own toolchain and cargo
+# config, so it is built from inside crates/firmware.
+exclude = ["crates/firmware"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+
+[workspace.lints.clippy]
+all = "warn"
