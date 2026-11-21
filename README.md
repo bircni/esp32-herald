@@ -111,7 +111,7 @@ guards against accidents on a shared network; it is not encryption.
 | `GET /api/state` | | Everything the device is doing right now |
 | `GET /api/settings` | | Current settings |
 | `PUT /api/settings` | any subset of the settings | Validates and saves |
-| `PUT /api/items/<id>` | `{"text","color","detail","age","ttl","wake","beep"}`, only `text` required | Adds or replaces a feed item |
+| `PUT /api/items/<id>` | `{"text","color","detail","age","since","ttl","wake","beep"}`, only `text` required | Adds or replaces a feed item |
 | `DELETE /api/items/<id>` | | Removes it |
 | `GET /api/items` | | The feed |
 | `DELETE /api/items` | | Empties the feed |
@@ -127,9 +127,10 @@ Feed items:
 - `detail`: up to 12 characters shown on the right. Without it the right
   side shows how long the item has been in its state (`now`, `12m`,
   `1h 05m`, `2d 3h`). Re-sending the same text and colour keeps that age;
-  `age` (seconds) sets it explicitly.
+  `age` (seconds) or `since` (Unix time in seconds) sets it explicitly.
 - `ttl`: seconds until the item removes itself (default: never, at most a
-  week). The feed holds up to 16 items and lives in RAM only.
+  week). The feed holds up to 16 items and lives in RAM only; retained MQTT
+  messages refill it after a restart.
 - `wake`: switch the display on and show the home view. `beep`: also beep.
 
 ```sh
@@ -138,7 +139,56 @@ curl -X PUT http://192.168.1.42/api/items/window.kitchen \
 curl -X DELETE http://192.168.1.42/api/items/window.kitchen
 ```
 
-### Claude Code hook
+## MQTT
+
+Set a broker on the web page (host, port, user, password, topic prefix) and
+the device connects, AWTRIX style: every feed item is a topic of its own.
+Changing or clearing the broker takes effect within a second, without a
+restart. HTTP keeps working alongside; both go through the same
+`Transport` trait (`crates/ui/src/command.rs`), so a message means the same
+thing whichever way it arrives.
+
+| Topic | Payload | Effect |
+|---|---|---|
+| `<prefix>/item/<id>` | item JSON as for HTTP | Adds or replaces the item |
+| `<prefix>/item/<id>` | empty | Removes the item |
+| `<prefix>/clear` | anything | Empties the feed |
+| `<prefix>/view` | `home` or `{"view":"home"}` | Switches view and wakes the display |
+| `<prefix>/settings` | any subset of the settings | Validates and saves |
+
+The device publishes `<prefix>/state` (retained, the same JSON as
+`GET /api/state`, whenever something changes and at least once a minute)
+and `<prefix>/status` (`online`, retained; `offline` as last will).
+
+Publish items **retained** and they come back on their own after the device
+restarts. For that, send `since` (Unix time in seconds when the state began)
+instead of `age`, as a retained message can be delivered long after it was
+sent. The HTTP token does not apply to MQTT; the broker's login does.
+
+```sh
+mosquitto_pub -h broker.lan -r -t deskbuddy/item/window.kitchen \
+  -m '{"text":"Kitchen window open","color":"red","since":1795000000}'
+mosquitto_pub -h broker.lan -r -t deskbuddy/item/window.kitchen -n   # closed
+```
+
+A Home Assistant automation for a window sensor:
+
+```yaml
+triggers:
+  - trigger: state
+    entity_id: binary_sensor.kitchen_window
+actions:
+  - action: mqtt.publish
+    data:
+      topic: deskbuddy/item/window.kitchen
+      retain: true
+      payload: >-
+        {% if trigger.to_state.state == 'on' %}
+        {"text":"Kitchen window open","color":"red","since":{{ as_timestamp(trigger.to_state.last_changed) | int }}}
+        {% endif %}
+```
+
+## Claude Code hook
 
 `tools/claude-hook.sh working|waiting|done|clear` keeps a `claude` item in the
 feed up to date (`BUDDY_ITEM` changes the id, e.g. one per machine). To wire

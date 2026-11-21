@@ -73,6 +73,7 @@ impl Rig {
                 net: NetState::Connected {
                     ip: "192.168.1.42".into(),
                 },
+                ..Env::default()
             },
             incremental: Frame::new(),
             checks: 0,

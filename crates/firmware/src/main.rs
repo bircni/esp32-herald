@@ -5,6 +5,7 @@
 //! own thread (see `net`).
 
 mod board;
+mod mqtt;
 mod net;
 mod outputs;
 mod shared;

@@ -442,6 +442,7 @@ mod tests {
                 second: 0,
             }),
             net: NetState::Offline,
+            ..Env::default()
         }
     }
 

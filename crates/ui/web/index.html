@@ -96,6 +96,19 @@
     <p class="dim" id="s-place"></p>
     <label for="s-token">Access token (optional, required for changes once set)</label>
     <input type="text" id="s-token" maxlength="64" autocomplete="off">
+    <h2 style="margin-top:1.2em">MQTT</h2>
+    <p class="dim">Feed items, view and settings can also come in over MQTT, e.g. from Home Assistant. Leave the broker empty to switch MQTT off.</p>
+    <div class="row">
+      <div><label for="s-mqtt-host">Broker</label><input type="text" id="s-mqtt-host" maxlength="64" placeholder="192.168.1.10"></div>
+      <div><label for="s-mqtt-port">Port</label><input type="number" id="s-mqtt-port" min="1" max="65535"></div>
+    </div>
+    <div class="row">
+      <div><label for="s-mqtt-user">User</label><input type="text" id="s-mqtt-user" maxlength="64" autocomplete="off"></div>
+      <div><label for="s-mqtt-pass">Password</label><input type="password" id="s-mqtt-pass" maxlength="64" autocomplete="off"></div>
+    </div>
+    <label for="s-mqtt-prefix">Topic prefix</label>
+    <input type="text" id="s-mqtt-prefix" maxlength="32">
+    <p class="dim" id="s-mqtt-topics"></p>
     <p><button class="primary" id="s-save">Save settings</button></p>
   </section>
 
@@ -186,6 +199,7 @@ function showState(s) {
     ["Network", s.net.state + (s.net.ip ? " (" + s.net.ip + ")" : "") + (s.net.ssid ? " (" + s.net.ssid + ")" : "")],
     ["View", s.view + (s.asleep ? ", asleep" : "")],
     ["Rotation", s.rotate ? "on" : "off"],
+    ["MQTT", s.mqtt],
     ["Weather", s.weather ? Math.round(s.weather.temp_c) + " °C, " + s.weather.condition : "none"],
     ["Firmware", s.version]
   ];
@@ -216,6 +230,12 @@ function showSettings(s) {
   $("s-rotate-until").value = s.rotate_until;
   for (const v of VIEWS) $("s-rv-" + v).checked = s.rotate_views.includes(v);
   $("s-token").value = s.token;
+  $("s-mqtt-host").value = s.mqtt_host;
+  $("s-mqtt-port").value = s.mqtt_port;
+  $("s-mqtt-user").value = s.mqtt_user;
+  $("s-mqtt-pass").value = s.mqtt_password;
+  $("s-mqtt-prefix").value = s.mqtt_prefix;
+  $("s-mqtt-topics").textContent = "Items: " + s.mqtt_prefix + "/item/<id>, view: " + s.mqtt_prefix + "/view, state: " + s.mqtt_prefix + "/state";
   const known = Object.keys(ZONES).find(k => ZONES[k] === s.timezone);
   $("s-tz").value = known || "custom";
   $("s-tz-custom").hidden = !!known;
@@ -268,7 +288,10 @@ $("s-save").onclick = () => run("Save", async () => {
     rotate: $("s-rotate").checked, rotate_secs: Number($("s-rotate-secs").value),
     rotate_from: $("s-rotate-from").value || "00:00", rotate_until: $("s-rotate-until").value || "00:00",
     rotate_views: VIEWS.filter(v => $("s-rv-" + v).checked),
-    timezone: tz, token: newToken, ...place
+    timezone: tz, token: newToken, ...place,
+    mqtt_host: $("s-mqtt-host").value.trim(), mqtt_port: Number($("s-mqtt-port").value),
+    mqtt_user: $("s-mqtt-user").value, mqtt_password: $("s-mqtt-pass").value,
+    mqtt_prefix: $("s-mqtt-prefix").value.trim()
   });
   token = newToken;
   try { localStorage.setItem("buddy-token", token); } catch (e) {}

@@ -23,7 +23,7 @@ use esp_idf_svc::{
 };
 use ui::{api, NetState};
 
-use crate::{shared::Shared, storage::WifiCredentials};
+use crate::{mqtt::MqttLink, shared::Shared, storage::WifiCredentials};
 
 const RETRY_DELAY: Duration = Duration::from_secs(5);
 const POLL_INTERVAL: Duration = Duration::from_secs(1);
@@ -125,6 +125,7 @@ fn run_station(
     sys::esp!(unsafe { sys::esp_wifi_set_ps(sys::wifi_ps_type_t_WIFI_PS_NONE) })?;
     let _server = serve(shared)?;
     let mut sntp = None;
+    let mut mqtt = MqttLink::new(format!("deskbuddy-{}", mac_suffix()));
 
     loop {
         if !wifi.is_connected()? {
@@ -144,17 +145,23 @@ fn run_station(
                 sntp = Some(EspSntp::new_default()?);
             }
         }
+        mqtt.poll(shared);
         update_weather(shared);
         thread::sleep(POLL_INTERVAL);
     }
 }
 
-/// `Buddy-XXXX` from the MAC address, and a random 8-character password.
-fn setup_network_name() -> (String, String) {
+/// The last two bytes of the MAC address, e.g. `67EC`.
+fn mac_suffix() -> String {
     let mut mac = [0u8; 6];
     // SAFETY: the buffer has the six bytes the function writes.
     unsafe { sys::esp_efuse_mac_get_default(mac.as_mut_ptr()) };
-    let ssid = format!("Buddy-{:02X}{:02X}", mac[4], mac[5]);
+    format!("{:02X}{:02X}", mac[4], mac[5])
+}
+
+/// `Buddy-XXXX` from the MAC address, and a random 8-character password.
+fn setup_network_name() -> (String, String) {
+    let ssid = format!("Buddy-{}", mac_suffix());
     // No characters that are easily confused on a small screen.
     const ALPHABET: &[u8] = b"abcdefghjkmnpqrstuvwxyz23456789";
     let password = (0..8)

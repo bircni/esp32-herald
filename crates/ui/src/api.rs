@@ -3,21 +3,17 @@
 //! back the returned [`Response`].
 
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 
 use crate::{
     app::App,
-    feed::{self, Item},
-    model::{Effect, Env, ItemColor, NetState, Settings, ViewId},
+    command::{self, check_item_id, parse_json, reject, Command, Rejection, Reply, Transport},
+    model::{Env, ViewId},
 };
 
 /// Bodies larger than this are rejected. Transports should not read more.
 pub const MAX_BODY: usize = 4096;
 pub const TOKEN_HEADER: &str = "X-Buddy-Token";
-
-const INDEX_HTML: &str = include_str!("../web/index.html");
-const ITEM_TTL_MAX: u32 = 7 * 86_400;
-const ITEM_AGE_MAX: u64 = 365 * 86_400;
 
 pub struct Request<'a> {
     pub method: &'a str,
@@ -35,28 +31,6 @@ pub struct Response {
     pub body: String,
 }
 
-const JSON: &str = "application/json";
-
-fn ok(value: Value) -> Response {
-    Response {
-        status: 200,
-        content_type: JSON,
-        body: value.to_string(),
-    }
-}
-
-fn error(status: u16, message: impl Into<String>) -> Response {
-    Response {
-        status,
-        content_type: JSON,
-        body: json!({ "error": message.into() }).to_string(),
-    }
-}
-
-fn parse<'a, T: Deserialize<'a>>(body: &'a [u8]) -> Result<T, Response> {
-    serde_json::from_slice(body).map_err(|e| error(400, format!("invalid JSON body: {e}")))
-}
-
 /// Compares without an early exit so the token cannot be guessed byte by
 /// byte from response times.
 fn token_matches(expected: &str, given: Option<&str>) -> bool {
@@ -71,174 +45,10 @@ fn token_matches(expected: &str, given: Option<&str>) -> bool {
     diff == 0
 }
 
-pub fn handle(app: &mut App, env: &Env, req: &Request<'_>) -> Response {
-    let path = req.path.split('?').next().unwrap_or("");
-    if req.body.len() > MAX_BODY {
-        return error(413, "request body too large");
-    }
-    match (req.method, path) {
-        ("GET", "/" | "/index.html") => {
-            return Response {
-                status: 200,
-                content_type: "text/html; charset=utf-8",
-                body: INDEX_HTML.into(),
-            }
-        }
-        // Read-only and free of secrets, so the page can always show it.
-        ("GET", "/api/state") => return ok(state(app, env)),
-        _ => {}
-    }
-    if !path.starts_with("/api/") {
-        return error(404, "not found");
-    }
-    let token = &app.settings().token;
-    if !token.is_empty() && !token_matches(token, req.token) {
-        return error(401, "missing or wrong X-Buddy-Token header");
-    }
-
-    if let Some(id) = path.strip_prefix("/api/items/") {
-        let result = match req.method {
-            "PUT" | "POST" => put_item(app, env, id, req.body),
-            "DELETE" => delete_item(app, id),
-            _ => Err(error(405, "method not allowed")),
-        };
-        return result.map_or_else(|e| e, ok);
-    }
-
-    let result = match (req.method, path) {
-        ("GET", "/api/settings") => Ok(json!(app.settings())),
-        ("PUT" | "POST", "/api/settings") => put_settings(app, req.body),
-        ("GET", "/api/items") => Ok(items_json(app, env)),
-        ("DELETE", "/api/items") => {
-            app.clear_items();
-            Ok(json!({ "ok": true }))
-        }
-        ("POST", "/api/view") => post_view(app, env, req.body),
-        ("POST", "/api/wifi") => post_wifi(app, req.body),
-        (_, "/api/settings" | "/api/items" | "/api/view" | "/api/wifi" | "/api/state") => {
-            Err(error(405, "method not allowed"))
-        }
-        _ => Err(error(404, "not found")),
-    };
-    result.map_or_else(|e| e, ok)
-}
-
-fn put_settings(app: &mut App, body: &[u8]) -> Result<Value, Response> {
-    let patch: serde_json::Map<String, Value> = parse(body)?;
-    let mut merged = json!(app.settings());
-    let fields = merged
-        .as_object_mut()
-        .expect("settings serialize to an object");
-    for (key, value) in patch {
-        if !fields.contains_key(&key) {
-            return Err(error(400, format!("unknown setting: {key}")));
-        }
-        fields.insert(key, value);
-    }
-    let settings: Settings =
-        serde_json::from_value(merged).map_err(|e| error(400, format!("invalid setting: {e}")))?;
-    app.update_settings(settings).map_err(|e| error(400, e))?;
-    Ok(json!(app.settings()))
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ItemRequest {
-    text: String,
-    #[serde(default)]
-    color: ItemColor,
-    #[serde(default)]
-    detail: String,
-    /// Seconds the reported state has already lasted.
-    age: Option<u64>,
-    /// Seconds until the item disappears on its own.
-    ttl: Option<u32>,
-    /// Wake the display and show the home view.
-    #[serde(default)]
-    wake: bool,
-    #[serde(default)]
-    beep: bool,
-}
-
-fn put_item(app: &mut App, env: &Env, id: &str, body: &[u8]) -> Result<Value, Response> {
-    if !feed::valid_id(id) {
-        return Err(error(
-            400,
-            format!(
-                "item id must be 1..={} characters of a-z, A-Z, 0-9, '-', '_', '.'",
-                feed::ID_MAX
-            ),
-        ));
-    }
-    let req: ItemRequest = parse(body)?;
-    let text = feed::clean(&req.text, feed::TEXT_MAX);
-    if text.trim().is_empty() {
-        return Err(error(400, "text must not be empty"));
-    }
-    if let Some(ttl) = req.ttl {
-        if !(1..=ITEM_TTL_MAX).contains(&ttl) {
-            return Err(error(
-                400,
-                format!("ttl must be 1..={ITEM_TTL_MAX} seconds"),
-            ));
-        }
-    }
-    let age_ms = req.age.unwrap_or(0).min(ITEM_AGE_MAX) * 1000;
-    app.put_item(
-        Item {
-            id: id.into(),
-            text,
-            detail: feed::clean(&req.detail, feed::DETAIL_MAX),
-            color: req.color,
-            since_ms: env.now_ms as i64 - age_ms as i64,
-            until_ms: req.ttl.map(|ttl| env.now_ms + u64::from(ttl) * 1000),
-        },
-        req.age.is_some(),
-    )
-    .map_err(|e| error(409, e))?;
-    if req.wake || req.beep {
-        app.alert(req.beep, env.now_ms);
-    }
-    Ok(json!({ "ok": true }))
-}
-
-fn delete_item(app: &mut App, id: &str) -> Result<Value, Response> {
-    if app.remove_item(id) {
-        Ok(json!({ "ok": true }))
-    } else {
-        Err(error(404, format!("no item {id:?}")))
-    }
-}
-
-fn items_json(app: &App, env: &Env) -> Value {
-    app.feed()
-        .iter()
-        .map(|i| {
-            json!({
-                "id": i.id,
-                "text": i.text,
-                "detail": i.detail,
-                "color": i.color,
-                "age_s": i.age_ms(env.now_ms) / 1000,
-                "remaining_s": i.until_ms.map(|u| u.saturating_sub(env.now_ms) / 1000),
-            })
-        })
-        .collect()
-}
-
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ViewRequest {
     view: String,
-}
-
-fn post_view(app: &mut App, env: &Env, body: &[u8]) -> Result<Value, Response> {
-    let req: ViewRequest = parse(body)?;
-    let view = ViewId::from_name(&req.view)
-        .ok_or_else(|| error(400, format!("unknown view: {}", req.view)))?;
-    app.set_view(view, env.now_ms);
-    app.wake(env.now_ms);
-    Ok(json!({ "view": view.name() }))
 }
 
 #[derive(Deserialize)]
@@ -249,63 +59,103 @@ struct WifiRequest {
     password: String,
 }
 
-fn post_wifi(app: &mut App, body: &[u8]) -> Result<Value, Response> {
-    let req: WifiRequest = parse(body)?;
-    if req.ssid.is_empty() || req.ssid.len() > 32 {
-        return Err(error(400, "ssid must be 1..=32 bytes"));
+/// Plain HTTP with an optional shared token.
+pub struct Http;
+
+impl Transport for Http {
+    type Message<'a> = Request<'a>;
+
+    fn decode(&self, app: &App, req: &Request<'_>) -> Result<Command, Rejection> {
+        let path = req.path.split('?').next().unwrap_or("");
+        if req.body.len() > MAX_BODY {
+            return Err(reject(413, "request body too large"));
+        }
+        match (req.method, path) {
+            ("GET", "/" | "/index.html") => return Ok(Command::Page),
+            // Read-only and free of secrets, so the page can always show it.
+            ("GET", "/api/state") => return Ok(Command::State),
+            _ => {}
+        }
+        if !path.starts_with("/api/") {
+            return Err(reject(404, "not found"));
+        }
+        let token = &app.settings().token;
+        if !token.is_empty() && !token_matches(token, req.token) {
+            return Err(reject(401, "missing or wrong X-Buddy-Token header"));
+        }
+
+        if let Some(id) = path.strip_prefix("/api/items/") {
+            return match req.method {
+                "PUT" | "POST" => {
+                    check_item_id(id)?;
+                    Ok(Command::PutItem {
+                        id: id.into(),
+                        item: parse_json(req.body)?,
+                    })
+                }
+                "DELETE" => Ok(Command::DeleteItem(id.into())),
+                _ => Err(reject(405, "method not allowed")),
+            };
+        }
+
+        match (req.method, path) {
+            ("GET", "/api/settings") => Ok(Command::GetSettings),
+            ("PUT" | "POST", "/api/settings") => {
+                Ok(Command::PatchSettings(parse_json::<Map<String, Value>>(
+                    req.body,
+                )?))
+            }
+            ("GET", "/api/items") => Ok(Command::GetItems),
+            ("DELETE", "/api/items") => Ok(Command::ClearItems),
+            ("POST", "/api/view") => {
+                let req: ViewRequest = parse_json(req.body)?;
+                ViewId::from_name(&req.view)
+                    .map(Command::ShowView)
+                    .ok_or_else(|| reject(400, format!("unknown view: {}", req.view)))
+            }
+            ("POST", "/api/wifi") => {
+                let req: WifiRequest = parse_json(req.body)?;
+                Ok(Command::SetWifi {
+                    ssid: req.ssid,
+                    password: req.password,
+                })
+            }
+            (_, "/api/settings" | "/api/items" | "/api/view" | "/api/wifi" | "/api/state") => {
+                Err(reject(405, "method not allowed"))
+            }
+            _ => Err(reject(404, "not found")),
+        }
     }
-    if !(req.password.is_empty() || (8..=63).contains(&req.password.len())) {
-        return Err(error(400, "password must be empty or 8..=63 characters"));
-    }
-    app.push_effect(Effect::SetWifi {
-        ssid: req.ssid,
-        password: req.password,
-    });
-    Ok(json!({ "ok": true, "note": "saved, the device now reconnects" }))
 }
 
-/// One decimal place, without the noise of an `f32` widened to `f64`
-/// (9.8 would otherwise be printed as 9.800000190734863).
-fn round1(v: f32) -> f64 {
-    (f64::from(v) * 10.0).round() / 10.0
-}
-
-/// Snapshot of the device for `GET /api/state`. Contains no secrets.
-pub fn state(app: &App, env: &Env) -> Value {
-    let now = env.now_ms;
-    let net = match &env.net {
-        NetState::Offline => json!({ "state": "offline" }),
-        NetState::Connecting { ssid } => json!({ "state": "connecting", "ssid": ssid }),
-        NetState::Connected { ip } => json!({ "state": "connected", "ip": ip }),
-        NetState::Setup { ssid, .. } => json!({ "state": "setup", "ssid": ssid }),
-    };
-    json!({
-        "version": crate::VERSION,
-        "uptime_s": now / 1000,
-        "view": app.view().name(),
-        "asleep": app.is_asleep(),
-        "token_required": !app.settings().token.is_empty(),
-        "net": net,
-        "time": env.local.map(|t| format!("{:02}:{:02}:{:02}", t.hour, t.minute, t.second)),
-        "rotate": app.settings().rotate,
-        "items": items_json(app, env),
-        "weather": app.weather().map(|w| json!({
-            "temp_c": round1(w.temp_c),
-            "min_c": round1(w.min_c),
-            "max_c": round1(w.max_c),
-            "condition": w.condition,
-            "is_day": w.is_day,
-            "updated": w.updated.map(|(h, m)| format!("{h:02}:{m:02}")),
-            "sunrise": w.sunrise.map(|(h, m)| format!("{h:02}:{m:02}")),
-            "sunset": w.sunset.map(|(h, m)| format!("{h:02}:{m:02}")),
-        })),
-    })
+/// Handles one HTTP request.
+pub fn handle(app: &mut App, env: &Env, req: &Request<'_>) -> Response {
+    match command::handle(&Http, app, env, req) {
+        Ok(Reply::Html(html)) => Response {
+            status: 200,
+            content_type: "text/html; charset=utf-8",
+            body: html.into(),
+        },
+        Ok(Reply::Json(value)) => Response {
+            status: 200,
+            content_type: "application/json",
+            body: value.to_string(),
+        },
+        Err(e) => Response {
+            status: e.status,
+            content_type: "application/json",
+            body: json!({ "error": e.message }).to_string(),
+        },
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{Calibration, Led};
+    use crate::{
+        feed,
+        model::{Calibration, Effect, Led, Settings},
+    };
 
     fn app() -> App {
         App::new(Settings::default(), Some(Calibration::identity()))

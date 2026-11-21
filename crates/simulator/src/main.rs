@@ -13,7 +13,10 @@ use std::{
     fs,
     io::Read,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
     thread,
     time::{Duration, Instant},
 };
@@ -36,6 +39,7 @@ const TICK: Duration = Duration::from_millis(30);
 struct Shared {
     app: Mutex<App>,
     net: Mutex<NetState>,
+    mqtt: Mutex<Option<bool>>,
     start: Instant,
     /// Where settings are stored; `None` keeps everything in memory.
     storage: Option<PathBuf>,
@@ -56,6 +60,8 @@ impl Shared {
                 second: now.second() as u8,
             }),
             net: self.net.lock().unwrap().clone(),
+            unix_s: Some(now.timestamp()),
+            mqtt: *self.mqtt.lock().unwrap(),
         }
     }
 
@@ -179,6 +185,7 @@ fn main() {
         } else {
             connected_net()
         }),
+        mqtt: Mutex::new(None),
         start: Instant::now(),
         storage: Some(dir),
     });
@@ -192,6 +199,7 @@ fn main() {
     }
     serve_http(Arc::clone(&shared), args.port);
     fetch_weather(Arc::clone(&shared));
+    run_mqtt(Arc::clone(&shared));
     run_window(&shared, args.calibrate);
 }
 
@@ -398,6 +406,141 @@ fn fetch_weather(shared: Arc<Shared>) {
     });
 }
 
+// ------------------------------------------------------------------ MQTT
+
+/// One broker connection. Its thread ends once `stop` is set.
+struct MqttConnection {
+    config: ui::mqtt::Config,
+    client: rumqttc::Client,
+    connected: Arc<AtomicBool>,
+    stop: Arc<AtomicBool>,
+}
+
+impl MqttConnection {
+    fn open(shared: &Arc<Shared>, config: ui::mqtt::Config) -> Self {
+        use rumqttc::{Event, LastWill, MqttOptions, Packet, QoS};
+
+        let mut options = MqttOptions::new("deskbuddy-sim", config.host.clone(), config.port);
+        options.set_keep_alive(Duration::from_secs(30));
+        options.set_last_will(LastWill::new(
+            config.status_topic(),
+            ui::mqtt::OFFLINE,
+            QoS::AtLeastOnce,
+            true,
+        ));
+        if !config.user.is_empty() {
+            options.set_credentials(config.user.clone(), config.password.clone());
+        }
+        let (client, mut connection) = rumqttc::Client::new(options, 32);
+        let connected = Arc::new(AtomicBool::new(false));
+        let stop = Arc::new(AtomicBool::new(false));
+
+        let (shared, flag, stopped, subscriber) = (
+            Arc::clone(shared),
+            Arc::clone(&connected),
+            Arc::clone(&stop),
+            client.clone(),
+        );
+        let transport = config.transport();
+        let topics = config.subscriptions();
+        let status = config.status_topic();
+        let url = config.url();
+        thread::spawn(move || {
+            for event in connection.iter() {
+                if stopped.load(Ordering::Relaxed) {
+                    break;
+                }
+                match event {
+                    Ok(Event::Incoming(Packet::ConnAck(_))) => {
+                        println!("[mqtt] connected to {url}");
+                        flag.store(true, Ordering::Relaxed);
+                        for topic in &topics {
+                            let _ = subscriber.try_subscribe(topic.as_str(), QoS::AtLeastOnce);
+                        }
+                        let _ = subscriber.try_publish(
+                            status.as_str(),
+                            QoS::AtLeastOnce,
+                            true,
+                            ui::mqtt::ONLINE,
+                        );
+                    }
+                    Ok(Event::Incoming(Packet::Publish(p))) => {
+                        let env = shared.env();
+                        let mut app = shared.app.lock().unwrap();
+                        let message = ui::mqtt::Message {
+                            topic: &p.topic,
+                            payload: &p.payload,
+                        };
+                        let result = ui::command::handle(&transport, &mut app, &env, &message);
+                        shared.apply_effects(&mut app);
+                        match result {
+                            Ok(_) => println!("[mqtt] {}", p.topic),
+                            Err(e) => eprintln!("[mqtt] {}: {}", p.topic, e.message),
+                        }
+                    }
+                    Ok(_) => {}
+                    Err(e) => {
+                        if flag.swap(false, Ordering::Relaxed) {
+                            eprintln!("[mqtt] disconnected: {e}");
+                        }
+                        // The next iteration reconnects.
+                        thread::sleep(Duration::from_secs(2));
+                    }
+                }
+            }
+        });
+        Self {
+            config,
+            client,
+            connected,
+            stop,
+        }
+    }
+
+    fn close(self) {
+        self.stop.store(true, Ordering::Relaxed);
+        let _ = self.client.disconnect();
+    }
+}
+
+/// Follows the MQTT settings, like the firmware's network thread does, and
+/// publishes the state.
+fn run_mqtt(shared: Arc<Shared>) {
+    thread::spawn(move || {
+        let mut current: Option<MqttConnection> = None;
+        let mut publisher = ui::mqtt::StatePublisher::default();
+        loop {
+            let wanted = ui::mqtt::Config::from_settings(shared.app.lock().unwrap().settings());
+            if current.as_ref().map(|c| &c.config) != wanted.as_ref() {
+                if let Some(old) = current.take() {
+                    old.close();
+                }
+                current = wanted.map(|config| MqttConnection::open(&shared, config));
+                publisher.reset();
+            }
+            let connected = current
+                .as_ref()
+                .map(|c| c.connected.load(Ordering::Relaxed));
+            *shared.mqtt.lock().unwrap() = connected;
+            if let (Some(c), Some(true)) = (&current, connected) {
+                let env = shared.env();
+                let payload = publisher.due(&shared.app.lock().unwrap(), &env);
+                if let Some(payload) = payload {
+                    let _ = c.client.try_publish(
+                        c.config.state_topic(),
+                        rumqttc::QoS::AtMostOnce,
+                        true,
+                        payload,
+                    );
+                }
+            } else {
+                publisher.reset();
+            }
+            thread::sleep(Duration::from_secs(1));
+        }
+    });
+}
+
 // ------------------------------------------------------------ screenshots
 
 /// A real Open-Meteo response (Berlin, 2026-11-21), so screenshots do not
@@ -422,6 +565,7 @@ fn screenshots(dir: &Path) -> Result<(), String> {
             second: 37,
         }),
         net: connected_net(),
+        ..Env::default()
     };
     let mut count = 0;
     let mut shot = |app: &mut App, env: &Env, name: &str| -> Result<(), String> {

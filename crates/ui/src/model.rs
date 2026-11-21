@@ -126,6 +126,13 @@ pub struct Settings {
     /// mean all day; `from` after `until` wraps past midnight.
     pub rotate_from: String,
     pub rotate_until: String,
+    /// MQTT broker host name or address. Empty switches MQTT off.
+    pub mqtt_host: String,
+    pub mqtt_port: u16,
+    pub mqtt_user: String,
+    pub mqtt_password: String,
+    /// Topic prefix, e.g. `deskbuddy` for `deskbuddy/item/<id>`.
+    pub mqtt_prefix: String,
 }
 
 impl Default for Settings {
@@ -145,6 +152,11 @@ impl Default for Settings {
             rotate_views: ViewId::ALL.to_vec(),
             rotate_from: "00:00".into(),
             rotate_until: "00:00".into(),
+            mqtt_host: String::new(),
+            mqtt_port: 1883,
+            mqtt_user: String::new(),
+            mqtt_password: String::new(),
+            mqtt_prefix: "deskbuddy".into(),
         }
     }
 }
@@ -192,6 +204,36 @@ impl Settings {
         }
         if parse_hhmm(&self.rotate_from).is_none() || parse_hhmm(&self.rotate_until).is_none() {
             return Err("rotate_from and rotate_until must look like HH:MM".into());
+        }
+        let host_ok = self.mqtt_host.len() <= 64
+            && self
+                .mqtt_host
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || ".-_:".contains(c));
+        if !host_ok {
+            return Err("mqtt_host must be a host name or IP address".into());
+        }
+        if self.mqtt_port == 0 {
+            return Err("mqtt_port must be 1..=65535".into());
+        }
+        for (name, value) in [
+            ("mqtt_user", &self.mqtt_user),
+            ("mqtt_password", &self.mqtt_password),
+        ] {
+            if value.len() > 64 || value.chars().any(char::is_control) {
+                return Err(format!("{name} must be at most 64 characters"));
+            }
+        }
+        let p = &self.mqtt_prefix;
+        let prefix_ok = !p.is_empty()
+            && p.len() <= 32
+            && !p.starts_with('/')
+            && !p.ends_with('/')
+            && !p.contains("//")
+            && p.chars()
+                .all(|c| c.is_ascii_alphanumeric() || "-_/".contains(c));
+        if !prefix_ok {
+            return Err("mqtt_prefix must be 1..=32 of a-z, A-Z, 0-9, '-', '_', '/'".into());
         }
         Ok(())
     }
@@ -493,6 +535,10 @@ pub struct Env {
     /// `None` until the clock has been synchronised.
     pub local: Option<LocalTime>,
     pub net: NetState,
+    /// Seconds since 1970 (UTC), `None` until the clock is synchronised.
+    pub unix_s: Option<i64>,
+    /// `None` while MQTT is switched off, else whether the broker is connected.
+    pub mqtt: Option<bool>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -713,6 +759,56 @@ mod tests {
         assert!(s.in_rotate_window(Some(&at(23, 0))));
         assert!(s.in_rotate_window(Some(&at(5, 59))));
         assert!(!s.in_rotate_window(Some(&at(12, 0))));
+    }
+
+    #[test]
+    fn mqtt_settings_are_validated() {
+        let ok = Settings {
+            mqtt_host: "192.168.1.10".into(),
+            mqtt_prefix: "home/office/buddy".into(),
+            ..Settings::default()
+        };
+        assert_eq!(ok.validate(), Ok(()));
+        for broken in [
+            Settings {
+                mqtt_host: "evil host".into(),
+                ..ok.clone()
+            },
+            Settings {
+                mqtt_port: 0,
+                ..ok.clone()
+            },
+            Settings {
+                mqtt_password: "a\nb".into(),
+                ..ok.clone()
+            },
+            Settings {
+                mqtt_prefix: String::new(),
+                ..ok.clone()
+            },
+            Settings {
+                mqtt_prefix: "buddy/#".into(),
+                ..ok.clone()
+            },
+            Settings {
+                mqtt_prefix: "buddy/+/x".into(),
+                ..ok.clone()
+            },
+            Settings {
+                mqtt_prefix: "/buddy".into(),
+                ..ok.clone()
+            },
+            Settings {
+                mqtt_prefix: "buddy/".into(),
+                ..ok.clone()
+            },
+            Settings {
+                mqtt_prefix: "a//b".into(),
+                ..ok.clone()
+            },
+        ] {
+            assert!(broken.validate().is_err(), "{broken:?}");
+        }
     }
 
     #[test]

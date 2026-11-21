@@ -17,6 +17,7 @@ const RESTART_DELAY_MS: u64 = 1_500;
 pub struct Shared {
     app: Mutex<App>,
     net: Mutex<NetState>,
+    mqtt: Mutex<Option<bool>>,
     storage: Mutex<Storage>,
     beeps: Mutex<Vec<Beep>>,
     /// Monotonic time at which to restart, if one is pending.
@@ -35,6 +36,7 @@ impl Shared {
         Self {
             app: Mutex::new(app),
             net: Mutex::new(NetState::Offline),
+            mqtt: Mutex::new(None),
             storage: Mutex::new(storage),
             beeps: Mutex::new(Vec::new()),
             restart_at_ms: Mutex::new(None),
@@ -51,11 +53,19 @@ impl Shared {
     }
 
     pub fn env(&self) -> Env {
+        let (unix_s, local) = wall_clock().unzip();
         Env {
             now_ms: self.now_ms(),
-            local: local_time(),
+            local,
             net: lock(&self.net).clone(),
+            unix_s,
+            mqtt: *lock(&self.mqtt),
         }
+    }
+
+    /// `None` while MQTT is off, else whether the broker is connected.
+    pub fn set_mqtt(&self, state: Option<bool>) {
+        *lock(&self.mqtt) = state;
     }
 
     pub fn set_net(&self, net: NetState) {
@@ -116,22 +126,22 @@ pub fn set_timezone(tz: &str) {
     }
 }
 
-/// Local wall-clock time, or `None` while the clock has not been set by SNTP
-/// (the ESP32 starts counting from 1970).
-fn local_time() -> Option<LocalTime> {
+/// Unix time and local wall-clock time, or `None` while the clock has not
+/// been set by SNTP (the ESP32 starts counting from 1970).
+fn wall_clock() -> Option<(i64, LocalTime)> {
     // SAFETY: `time` and `localtime_r` only write to the values passed in,
     // and an all-zero `tm` is a valid value for a plain C struct.
-    let tm = unsafe {
+    let (now, tm) = unsafe {
         let mut now: sys::time_t = 0;
         sys::time(&mut now);
         let mut tm: sys::tm = core::mem::zeroed();
         sys::localtime_r(&now, &mut tm);
-        tm
+        (now, tm)
     };
     if tm.tm_year < 2024 - 1900 {
         return None;
     }
-    Some(LocalTime {
+    let local = LocalTime {
         year: (tm.tm_year + 1900) as u16,
         month: (tm.tm_mon + 1) as u8,
         day: tm.tm_mday as u8,
@@ -140,5 +150,6 @@ fn local_time() -> Option<LocalTime> {
         hour: tm.tm_hour as u8,
         minute: tm.tm_min as u8,
         second: tm.tm_sec.min(59) as u8,
-    })
+    };
+    Some((now, local))
 }
