@@ -24,7 +24,7 @@ pub struct Touch<'d> {
 }
 
 impl<'d> Touch<'d> {
-    pub fn new(spi: SpiDeviceDriver<'d, &'d SpiDriver<'d>>) -> Self {
+    pub const fn new(spi: SpiDeviceDriver<'d, &'d SpiDriver<'d>>) -> Self {
         Self { spi }
     }
 
@@ -57,8 +57,8 @@ impl<'d> Touch<'d> {
             return None;
         }
         Some(RawTouch {
-            x: (a1 + a2) / 2,
-            y: (b1 + b2) / 2,
+            x: u16::midpoint(a1, a2),
+            y: u16::midpoint(b1, b2),
         })
     }
 }

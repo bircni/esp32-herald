@@ -6,7 +6,7 @@
 use std::convert::Infallible;
 
 use embedded_graphics::{pixelcolor::Rgb565, prelude::*};
-use ui::{api, App, Env, LocalTime, NetState, RawTouch, Settings, ViewId, SCREEN_H, SCREEN_W};
+use ui::{App, Env, LocalTime, NetState, RawTouch, SCREEN_H, SCREEN_W, Settings, ViewId, api};
 
 #[derive(Clone, PartialEq)]
 struct Frame(Vec<Rgb565>);
@@ -14,10 +14,10 @@ struct Frame(Vec<Rgb565>);
 impl Frame {
     fn new() -> Self {
         // Not a colour the UI uses, so unpainted pixels are noticed.
-        Frame(vec![Rgb565::new(31, 0, 31); (SCREEN_W * SCREEN_H) as usize])
+        Self(vec![Rgb565::new(31, 0, 31); (SCREEN_W * SCREEN_H) as usize])
     }
 
-    fn first_difference(&self, other: &Frame) -> Option<(i32, i32)> {
+    fn first_difference(&self, other: &Self) -> Option<(i32, i32)> {
         let i = self.0.iter().zip(&other.0).position(|(a, b)| a != b)? as i32;
         Some((i % SCREEN_W, i / SCREEN_W))
     }
@@ -33,6 +33,10 @@ impl DrawTarget for Frame {
     type Color = Rgb565;
     type Error = Infallible;
 
+    #[expect(
+        clippy::panic_in_result_fn,
+        reason = "test display: a pixel off the screen fails the test"
+    )]
     fn draw_iter<I>(&mut self, pixels: I) -> Result<(), Self::Error>
     where
         I: IntoIterator<Item = Pixel<Self::Color>>,
@@ -57,7 +61,7 @@ struct Rig {
 
 impl Rig {
     fn new() -> Self {
-        Rig {
+        Self {
             app: App::new(Settings::default(), None),
             env: Env {
                 now_ms: 0,
@@ -117,7 +121,7 @@ impl Rig {
         }
     }
 
-    fn advance_wall_clock(&mut self) {
+    const fn advance_wall_clock(&mut self) {
         let Some(t) = self.env.local.as_mut() else {
             return;
         };
@@ -162,9 +166,10 @@ impl Rig {
                 path,
                 body: body.as_bytes(),
                 token: None,
+                if_none_match: None,
             },
         );
-        assert_eq!(r.status, 200, "{method} {path} {body}: {}", r.body);
+        assert_eq!(r.status, 200, "{method} {path} {body}: {}", r.text());
         self.app.take_effects();
         self.check(path);
     }
@@ -178,9 +183,13 @@ impl Rig {
     }
 }
 
-const FORECAST: &str = r#"{"current":{"temperature_2m":6.4,"weather_code":3,"is_day":0},"hourly":{"time":["2026-11-21T17:00","2026-11-21T18:00","2026-11-21T19:00","2026-11-21T20:00","2026-11-21T21:00","2026-11-21T22:00","2026-11-21T23:00","2026-11-22T00:00","2026-11-22T01:00","2026-11-22T02:00","2026-11-22T03:00","2026-11-22T04:00"],"temperature_2m":[6.4,6.2,5.9,5.7,5.5,5.3,5.2,4.9,4.8,4.8,4.7,4.5],"precipitation_probability":[23,40,35,18,13,10,20,33,45,45,28,13],"weather_code":[3,3,80,80,61,3,3,3,61,61,3,2],"is_day":[0,0,0,0,0,0,0,0,0,0,0,0]},"daily":{"time":["2026-11-21","2026-11-22","2026-11-23","2026-11-24"],"weather_code":[80,61,77,3],"temperature_2m_max":[6.7,4.9,3.0,1.7],"temperature_2m_min":[0.6,2.1,-0.6,-1.0],"sunrise":["2026-11-21T07:38","2026-11-22T07:39","2026-11-23T07:41","2026-11-24T07:43"],"sunset":["2026-11-21T16:05","2026-11-22T16:04","2026-11-23T16:03","2026-11-24T16:02"]}}"#;
+const FORECAST: &str = r#"{"temp":6.4,"condition":"cloudy","is_day":false,"sunrise":"07:38","sunset":"16:05","hourly":[{"hour":17,"temp":6.4,"rain":23,"condition":"cloudy","is_day":false},{"hour":18,"temp":6.2,"rain":40,"condition":"cloudy","is_day":false},{"hour":19,"temp":5.9,"rain":35,"condition":"rainy","is_day":false},{"hour":20,"temp":5.7,"rain":18,"condition":"rainy","is_day":false},{"hour":21,"temp":5.5,"rain":13,"condition":"rainy","is_day":false},{"hour":22,"temp":5.3,"rain":10,"condition":"cloudy","is_day":false},{"hour":23,"temp":5.2,"rain":20,"condition":"cloudy","is_day":false},{"hour":0,"temp":4.9,"rain":33,"condition":"cloudy","is_day":false},{"hour":1,"temp":4.8,"rain":45,"condition":"rainy","is_day":false},{"hour":2,"temp":4.8,"rain":45,"condition":"rainy","is_day":false},{"hour":3,"temp":4.7,"rain":28,"condition":"cloudy","is_day":false},{"hour":4,"temp":4.5,"rain":13,"condition":"partlycloudy","is_day":false}],"daily":[{"date":"2026-11-21","min":0.6,"max":6.7,"condition":"rainy"},{"date":"2026-11-22","min":2.1,"max":4.9,"condition":"rainy"},{"date":"2026-11-23","min":-0.6,"max":3.0,"condition":"snowy"},{"date":"2026-11-24","min":-1.0,"max":1.7,"condition":"cloudy"}]}"#;
 
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one scenario from first boot to sleep"
+)]
 fn incremental_redraw_matches_full_redraw() {
     let mut r = Rig::new();
     let corners = [(30, 30), (450, 30), (450, 290), (30, 290)];
@@ -200,13 +209,9 @@ fn incremental_redraw_matches_full_redraw() {
     // Home: the clock runs across midnight, the feed fills up, ages and
     // overflows, items change colour and disappear.
     r.run("idle home", 12_000, None);
-    r.post(
-        "/api/settings",
-        r#"{"location":"Berlin","latitude":52.52,"longitude":13.41}"#,
-    );
-    r.run("weather loading", 300, None);
-    r.app.set_weather(FORECAST, &r.env).unwrap();
-    r.check("weather");
+    r.run("no weather yet", 300, None);
+    r.put("/api/weather", FORECAST);
+    r.run("weather", 300, None);
     r.put("/api/items/claude", r#"{"text":"Claude is working"}"#);
     r.run("one item", 1_000, None);
     r.put(
@@ -251,13 +256,53 @@ fn incremental_redraw_matches_full_redraw() {
     r.swipe("to calendar", (400, 160), (80, 160));
     assert_eq!(r.app.view(), ViewId::Calendar);
     r.run("calendar", 300, None);
-    r.post(
-        "/api/settings",
-        r#"{"location":"","latitude":0,"longitude":0}"#,
-    );
+    r.request("DELETE", "/api/weather", "");
     r.run("calendar without daylight", 300, None);
     r.post("/api/view", r#"{"view":"forecast"}"#);
-    r.run("forecast without location", 300, None);
+    r.run("forecast without weather", 300, None);
+
+    // Custom screens: every widget, values changing, layouts switching.
+    r.put("/api/weather", FORECAST);
+    let all = r##"{"title":"Everything","widgets":[
+        {"type":"value","label":"Solar","value":3.2,"unit":"kW","color":"yellow"},
+        {"type":"gauge","label":"Battery","value":64,"unit":"%","zones":[{"to":20,"color":"red"},{"to":100,"color":"green"}]},
+        {"type":"chart","label":"Today","values":[0,0.4,1.8,3.2,2.1],"unit":"kW"},
+        {"type":"list","rows":[{"label":"Kitchen","value":21.5,"unit":"°"},{"label":"Bath","value":23}]},
+        {"type":"grid","tiles":[{"label":"CO2","value":812},{"label":"Hum","value":"48%","color":"#3366FF"}]},
+        {"type":"countdown","label":"Train","until":1795334400}
+    ]}"##;
+    r.put("/api/screens/all", all);
+    r.post("/api/view", r#"{"view":"all"}"#);
+    r.run("custom screen", 300, None);
+    r.put(
+        "/api/screens/all",
+        &all.replace(
+            "3.2,\"unit\":\"kW\",\"color\"",
+            "4.7,\"unit\":\"kW\",\"color\"",
+        ),
+    );
+    r.run("custom screen, new value", 300, None);
+    let extras = r#"{"widgets":[
+        {"type":"value","value":"1234","digits":true},
+        {"type":"gauge","label":"CPU","value":40,"style":"bar"},
+        {"type":"progress","label":"Upload","value":70},
+        {"type":"text","text":"A longer paragraph that has to wrap over a few lines","size":"small"},
+        {"type":"icon","icon":"window","label":"Kitchen","value":"open","color":"red"},
+        {"type":"chart","values":[3,1,4,1,5,9,2,6],"style":"bar"}
+    ]}"#;
+    r.put("/api/screens/extras", extras);
+    r.post("/api/view", r#"{"view":"extras"}"#);
+    r.run("custom screen with extras", 300, None);
+    r.put(
+        "/api/screens/clock",
+        r#"{"widgets":[{"type":"clock"},{"type":"weather"}]}"#,
+    );
+    r.post("/api/view", r#"{"view":"clock"}"#);
+    r.run("clock and weather widgets", 300, None);
+    r.request("DELETE", "/api/screens/clock", "");
+    r.run("screen removed", 300, None);
+    r.request("DELETE", "/api/screens/all", "");
+    r.request("DELETE", "/api/screens/extras", "");
 
     // Menu: every entry, then back out.
     r.run("long press", 900, Some((240, 160)));
@@ -297,7 +342,7 @@ fn incremental_redraw_matches_full_redraw() {
 
     // WiFi setup mode appears, is dismissed by a tap, and ends.
     r.env.net = NetState::Setup {
-        ssid: "Buddy-A1B2".into(),
+        ssid: "Herald-A1B2".into(),
         password: "k7mq2xwp".into(),
         ip: "192.168.71.1".into(),
     };

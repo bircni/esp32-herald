@@ -2,13 +2,23 @@
 name = "ui"
 version.workspace = true
 edition.workspace = true
-description = "Hardware-independent UI, state and HTTP API of the deskbuddy"
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+description = "Hardware-independent UI, state and HTTP API of Herald"
 
 [dependencies]
 embedded-graphics = "0.8"
-u8g2-fonts = "0.8"
+u8g2-fonts = "0.9"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+
+[dev-dependencies]
+flate2 = "1"
+
+[build-dependencies]
+flate2 = "1"
 
 [lints]
 workspace = true

@@ -18,6 +18,12 @@ pub struct Shared {
     app: Mutex<App>,
     net: Mutex<NetState>,
     mqtt: Mutex<Option<bool>>,
+    rssi: Mutex<Option<i8>>,
+    /// The running firmware slot, e.g. `ota_0`.
+    firmware_slot: Option<String>,
+    /// Custom screens to publish retained on MQTT: name and payload
+    /// (`None` clears). Drained by the MQTT link.
+    outbox: Mutex<Vec<(String, Option<String>)>>,
     storage: Mutex<Storage>,
     beeps: Mutex<Vec<Beep>>,
     /// Monotonic time at which to restart, if one is pending.
@@ -28,15 +34,20 @@ pub struct Shared {
 /// A poisoned lock means another thread panicked; on the device a panic
 /// reboots anyway, so the data is used as it is.
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
-    mutex.lock().unwrap_or_else(|e| e.into_inner())
+    mutex
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 impl Shared {
-    pub fn new(app: App, storage: Storage) -> Self {
+    pub fn new(app: App, storage: Storage, firmware_slot: Option<String>) -> Self {
         Self {
             app: Mutex::new(app),
             net: Mutex::new(NetState::Offline),
             mqtt: Mutex::new(None),
+            rssi: Mutex::new(None),
+            firmware_slot,
+            outbox: Mutex::new(Vec::new()),
             storage: Mutex::new(storage),
             beeps: Mutex::new(Vec::new()),
             restart_at_ms: Mutex::new(None),
@@ -60,7 +71,19 @@ impl Shared {
             net: lock(&self.net).clone(),
             unix_s,
             mqtt: *lock(&self.mqtt),
+            rssi: *lock(&self.rssi),
+            heap_free: Some(free_heap()),
+            firmware_slot: self.firmware_slot.clone(),
         }
+    }
+
+    pub fn set_rssi(&self, rssi: Option<i8>) {
+        *lock(&self.rssi) = rssi;
+    }
+
+    /// Screens waiting to be published, and forgets them.
+    pub fn take_outbox(&self) -> Vec<(String, Option<String>)> {
+        std::mem::take(&mut *lock(&self.outbox))
     }
 
     /// `None` while MQTT is off, else whether the broker is connected.
@@ -84,7 +107,7 @@ impl Shared {
         lock(&self.restart_at_ms).is_some_and(|at| self.now_ms() >= at)
     }
 
-    fn schedule_restart(&self) {
+    pub fn schedule_restart(&self) {
         *lock(&self.restart_at_ms) = Some(self.now_ms() + RESTART_DELAY_MS);
     }
 
@@ -108,12 +131,40 @@ impl Shared {
                     lock(&self.storage).save_wifi(&WifiCredentials { ssid, password });
                     self.schedule_restart();
                 }
+                Effect::PublishScreen { name, payload } => {
+                    lock(&self.outbox).push((name, payload));
+                }
+                Effect::Restart => {
+                    log::info!("restart requested");
+                    self.schedule_restart();
+                }
             }
         }
     }
 }
 
+/// Free heap in bytes.
+pub fn free_heap() -> u32 {
+    heap_stats().0
+}
+
+/// Free heap now and at its lowest point since boot, in bytes.
+#[expect(unsafe_code, reason = "ESP-IDF heap statistics are C functions")]
+pub fn heap_stats() -> (u32, u32) {
+    // SAFETY: plain getters without preconditions.
+    unsafe {
+        (
+            sys::esp_get_free_heap_size(),
+            sys::esp_get_minimum_free_heap_size(),
+        )
+    }
+}
+
 /// Applies a POSIX TZ string to the C library's local time conversion.
+#[expect(
+    unsafe_code,
+    reason = "the C library's time zone is set through setenv/tzset"
+)]
 pub fn set_timezone(tz: &str) {
     let Ok(value) = CString::new(tz) else {
         return;
@@ -128,14 +179,15 @@ pub fn set_timezone(tz: &str) {
 
 /// Unix time and local wall-clock time, or `None` while the clock has not
 /// been set by SNTP (the ESP32 starts counting from 1970).
+#[expect(unsafe_code, reason = "the wall clock comes from the C library")]
 fn wall_clock() -> Option<(i64, LocalTime)> {
     // SAFETY: `time` and `localtime_r` only write to the values passed in,
     // and an all-zero `tm` is a valid value for a plain C struct.
     let (now, tm) = unsafe {
         let mut now: sys::time_t = 0;
-        sys::time(&mut now);
+        sys::time(&raw mut now);
         let mut tm: sys::tm = core::mem::zeroed();
-        sys::localtime_r(&now, &mut tm);
+        sys::localtime_r(&raw const now, &raw mut tm);
         (now, tm)
     };
     if tm.tm_year < 2024 - 1900 {

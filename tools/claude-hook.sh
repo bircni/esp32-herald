@@ -1,5 +1,5 @@
 #!/bin/sh
-# Shows what Claude Code is doing as an item in the deskbuddy's feed.
+# Shows what Claude Code is doing as an item in the Herald feed.
 #
 #   tools/claude-hook.sh working   # a prompt was submitted
 #   tools/claude-hook.sh waiting   # Claude needs your attention
@@ -7,17 +7,17 @@
 #   tools/claude-hook.sh clear
 #
 # Configuration (environment):
-#   BUDDY_URL    base URL of the device, e.g. http://192.168.1.42
+#   HERALD_URL    base URL of the device, e.g. http://192.168.1.42
 #                (the simulator listens on http://127.0.0.1:8080)
-#   BUDDY_TOKEN  access token, if one is set on the device
-#   BUDDY_ITEM   feed item id, default "claude"; set one per machine or
+#   HERALD_TOKEN  access token, if one is set on the device
+#   HERALD_ITEM   feed item id, default "claude"; set one per machine or
 #                project to show several sessions side by side
 #
 # The script never fails and never waits longer than three seconds, so a
-# switched-off buddy cannot hold up Claude Code.
+# switched-off herald cannot hold up Claude Code.
 
-url="${BUDDY_URL:-http://127.0.0.1:8080}"
-item="${BUDDY_ITEM:-claude}"
+url="${HERALD_URL:-http://127.0.0.1:8080}"
+item="${HERALD_ITEM:-claude}"
 
 case "${1:-}" in
   working) body='{"text":"Claude is working","color":"blue"}' ;;
@@ -32,8 +32,8 @@ if [ -n "$body" ]; then
 else
   set -- -X DELETE "$url/api/items/$item"
 fi
-if [ -n "${BUDDY_TOKEN:-}" ]; then
-  set -- -H "X-Buddy-Token: $BUDDY_TOKEN" "$@"
+if [ -n "${HERALD_TOKEN:-}" ]; then
+  set -- -H "X-Herald-Token: $HERALD_TOKEN" "$@"
 fi
 curl --silent --output /dev/null --max-time 3 "$@" || true
 exit 0

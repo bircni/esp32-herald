@@ -8,9 +8,10 @@ use crate::{
     gesture::{Dir, Gesture, Recognizer},
     gfx::{self, Canvas},
     model::{
-        screen, Beep, Calibration, Effect, Env, ItemColor, Led, NetState, RawTouch, Settings,
-        ViewId,
+        ALL_SCREENS, Beep, Calibration, Effect, Env, ItemColor, Led, NetState, RawTouch, Settings,
+        ViewId, screen,
     },
+    screen::{Screen, Screens},
     theme::Theme,
     views::{self, Region},
     weather::{self, Weather},
@@ -21,13 +22,17 @@ pub const ROTATE_TOUCH_PAUSE_MS: u64 = 60_000;
 
 /// What currently fills the display.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Screen {
+pub(crate) enum Showing {
     Calibrate,
     WifiSetup,
     Menu,
     View(ViewId),
 }
 
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "independent UI flags, not a state machine"
+)]
 pub struct App {
     pub(crate) settings: Settings,
     pub(crate) calibration: Option<Calibration>,
@@ -38,7 +43,15 @@ pub struct App {
     pub(crate) setup_dismissed: bool,
     pub(crate) feed: Feed,
     pub(crate) weather: Option<Weather>,
-    next_weather_ms: u64,
+    /// When the weather was last set, to drop it once stale.
+    weather_ms: u64,
+    pub(crate) screens: Screens,
+    /// Night mode applies right now (updated every tick).
+    night_now: bool,
+    /// Night mode applies and nothing has lit the screen (every tick).
+    night_dim: bool,
+    /// At night, a touch or an alert lights the screen until then.
+    night_wake_until_ms: u64,
     gesture: Recognizer,
     last_activity_ms: u64,
     /// When the view last changed, for rotation.
@@ -49,7 +62,7 @@ pub struct App {
     effects: Vec<Effect>,
     buf: Vec<Rgb565>,
     cache: Vec<u64>,
-    cache_screen: Option<(Screen, i64)>,
+    cache_screen: Option<(Showing, i64)>,
 }
 
 impl App {
@@ -69,7 +82,11 @@ impl App {
             setup_dismissed: false,
             feed: Feed::default(),
             weather: None,
-            next_weather_ms: 0,
+            weather_ms: 0,
+            screens: Screens::default(),
+            night_now: false,
+            night_dim: false,
+            night_wake_until_ms: 0,
             gesture: Recognizer::new(),
             last_activity_ms: 0,
             last_switch_ms: 0,
@@ -84,23 +101,28 @@ impl App {
 
     // ------------------------------------------------------------ accessors
 
-    pub fn settings(&self) -> &Settings {
+    #[must_use]
+    pub const fn settings(&self) -> &Settings {
         &self.settings
     }
 
-    pub fn view(&self) -> ViewId {
+    #[must_use]
+    pub const fn view(&self) -> ViewId {
         self.view
     }
 
+    #[must_use]
     pub fn feed(&self) -> &[Item] {
         self.feed.items()
     }
 
-    pub fn weather(&self) -> Option<&Weather> {
+    #[must_use]
+    pub const fn weather(&self) -> Option<&Weather> {
         self.weather.as_ref()
     }
 
-    pub fn is_asleep(&self) -> bool {
+    #[must_use]
+    pub const fn is_asleep(&self) -> bool {
         self.asleep
     }
 
@@ -111,16 +133,64 @@ impl App {
     }
 
     /// Backlight level in percent.
-    pub fn backlight(&self) -> u8 {
+    #[must_use]
+    pub const fn backlight(&self) -> u8 {
         if self.asleep {
             0
+        } else if self.night_dimmed() {
+            self.settings.night_brightness
         } else {
             self.settings.brightness
         }
     }
 
+    /// Night mode applies and nothing has lit the screen.
+    #[must_use]
+    pub const fn night_dimmed(&self) -> bool {
+        self.night_dim
+    }
+
+    /// Whether night mode applies right now.
+    #[must_use]
+    pub const fn is_night(&self) -> bool {
+        self.night_now
+    }
+
+    #[must_use]
+    pub const fn screens(&self) -> &Screens {
+        &self.screens
+    }
+
+    /// Views in swipe order: the built-in ones, then custom screens by name.
+    #[must_use]
+    pub fn nav_order(&self) -> Vec<ViewId> {
+        ViewId::BUILT_IN
+            .into_iter()
+            .chain(self.screens.ordered().into_iter().map(ViewId::Screen))
+            .collect()
+    }
+
+    #[must_use]
+    pub fn view_name(&self, view: ViewId) -> String {
+        match (view.built_in_name(), view) {
+            (Some(name), _) => name.to_owned(),
+            (None, ViewId::Screen(slot)) => self
+                .screens
+                .get(slot)
+                .map_or_else(String::new, |e| e.name.clone()),
+            (None, ViewId::Home | ViewId::Forecast | ViewId::Calendar) => String::new(),
+        }
+    }
+
+    /// A built-in view or a custom screen by name.
+    #[must_use]
+    pub fn view_by_name(&self, name: &str) -> Option<ViewId> {
+        ViewId::built_in(name).or_else(|| self.screens.slot(name).map(ViewId::Screen))
+    }
+
     /// A red or yellow item at the top of the feed lights the LED in its
     /// colour.
+    #[must_use]
     pub fn led(&self) -> Led {
         match self.feed.top().map(|i| i.color) {
             Some(ItemColor::Red) => Led::Red,
@@ -138,27 +208,68 @@ impl App {
     pub fn wake(&mut self, now_ms: u64) {
         self.asleep = false;
         self.last_activity_ms = now_ms;
+        self.light_at_night(now_ms);
     }
 
-    pub fn set_view(&mut self, view: ViewId, now_ms: u64) {
+    /// Lights a night-dimmed screen for `sleep_secs` (at least 30 s).
+    fn light_at_night(&mut self, now_ms: u64) {
+        let secs = u64::from(self.settings.sleep_secs.max(30));
+        self.night_wake_until_ms = now_ms + secs * 1000;
+        self.night_dim = false;
+    }
+
+    /// Sends the display to sleep now, e.g. from the web page.
+    pub const fn sleep(&mut self) {
+        self.asleep = true;
+        self.menu_open = false;
+    }
+
+    /// Adds or replaces a custom screen.
+    ///
+    /// # Errors
+    /// When the screen is invalid or all slots are taken.
+    pub fn put_screen(&mut self, name: &str, screen: Screen, now_ms: u64) -> Result<(), String> {
+        self.screens.put(name, screen, now_ms).map(|_| ())
+    }
+
+    pub fn remove_screen(&mut self, name: &str) -> bool {
+        let removed = self.screens.remove(name);
+        self.leave_missing_screen();
+        removed
+    }
+
+    /// Goes home if the shown custom screen no longer exists.
+    fn leave_missing_screen(&mut self) {
+        if let ViewId::Screen(slot) = self.view
+            && self.screens.get(slot).is_none()
+        {
+            self.view = ViewId::Home;
+        }
+    }
+
+    /// A gesture made on the web preview, handled as if it was made on the
+    /// screen: it wakes a sleeping display and otherwise does what a touch
+    /// would.
+    pub fn remote_gesture(&mut self, gesture: Gesture, env: &Env) {
+        let was_asleep = self.asleep;
+        self.wake(env.now_ms);
+        if !was_asleep {
+            self.on_gesture(gesture, env);
+        }
+    }
+
+    pub const fn set_view(&mut self, view: ViewId, now_ms: u64) {
         self.view = view;
         self.menu_open = false;
         self.last_switch_ms = now_ms;
     }
 
     /// Replaces the settings after validating them.
+    ///
+    /// # Errors
+    /// When the new settings are invalid; the old ones stay.
     pub fn update_settings(&mut self, new: Settings) -> Result<(), String> {
         new.validate()?;
-        let location_changed = (new.latitude, new.longitude, &new.location)
-            != (
-                self.settings.latitude,
-                self.settings.longitude,
-                &self.settings.location,
-            );
-        if location_changed {
-            self.weather = None;
-            self.next_weather_ms = 0;
-        }
         if new != self.settings {
             self.settings = new;
             self.effects.push(Effect::SaveSettings);
@@ -167,6 +278,9 @@ impl App {
     }
 
     /// Adds or replaces a feed item; see [`Feed::upsert`].
+    ///
+    /// # Errors
+    /// When the feed is full.
     pub fn put_item(&mut self, item: Item, explicit_since: bool) -> Result<(), String> {
         self.feed.upsert(item, explicit_since)
     }
@@ -196,27 +310,15 @@ impl App {
 
     // ------------------------------------------------------------- weather
 
-    /// Returns the URL to fetch when a weather update is due. The platform
-    /// reports the outcome through [`App::set_weather`].
-    pub fn weather_due(&mut self, env: &Env) -> Option<String> {
-        if !self.settings.has_location()
-            || !matches!(env.net, NetState::Connected { .. })
-            || env.now_ms < self.next_weather_ms
-        {
-            return None;
-        }
-        // Assume failure until told otherwise, so a hung request is retried.
-        self.next_weather_ms = env.now_ms + weather::RETRY_MS;
-        Some(weather::url(&self.settings))
+    pub fn clear_weather(&mut self) {
+        self.weather = None;
     }
 
-    /// `body` is the HTTP response body of the weather request.
-    pub fn set_weather(&mut self, body: &str, env: &Env) -> Result<(), String> {
-        let mut w = weather::parse(body)?;
+    /// Replaces the weather, e.g. from an MQTT message.
+    pub fn set_weather(&mut self, mut w: Weather, env: &Env) {
         w.updated = env.local.map(|t| (t.hour, t.minute));
         self.weather = Some(w);
-        self.next_weather_ms = env.now_ms + weather::REFRESH_MS;
-        Ok(())
+        self.weather_ms = env.now_ms;
     }
 
     // ---------------------------------------------------------------- tick
@@ -242,11 +344,16 @@ impl App {
             _ => None,
         };
         if touch.is_some() {
-            if self.asleep {
-                self.asleep = false;
+            // A dark screen only wakes; the touch does nothing else.
+            let dark = self.asleep || (self.night_dim && self.settings.night_brightness == 0);
+            if dark && !self.swallow_touch {
                 self.swallow_touch = true;
             }
+            self.asleep = false;
             self.last_activity_ms = now;
+            if self.night_now {
+                self.light_at_night(now);
+            }
         }
         if self.swallow_touch {
             self.gesture.reset();
@@ -258,6 +365,13 @@ impl App {
         }
 
         self.feed.expire(now);
+        self.screens.expire(now);
+        self.leave_missing_screen();
+        if now.saturating_sub(self.weather_ms) >= weather::STALE_MS {
+            self.weather = None;
+        }
+        self.night_now = self.settings.is_night(env.local.as_ref());
+        self.night_dim = self.night_now && now >= self.night_wake_until_ms;
         if !matches!(env.net, NetState::Setup { .. }) {
             self.setup_dismissed = false;
         }
@@ -277,7 +391,7 @@ impl App {
     fn rotate(&mut self, env: &Env) {
         let s = &self.settings;
         let now = env.now_ms;
-        let showing_view = matches!(self.screen(env), Screen::View(_));
+        let showing_view = matches!(self.showing(env), Showing::View(_));
         if !s.rotate
             || self.asleep
             || !showing_view
@@ -288,55 +402,87 @@ impl App {
         {
             return;
         }
-        let views = &s.rotate_views;
-        let next = match views.iter().position(|v| *v == self.view) {
-            Some(i) => views[(i + 1) % views.len()],
-            None => views[0],
+        let order = self.rotation_order();
+        let Some(&first) = order.first() else {
+            return;
         };
+        let next = order
+            .iter()
+            .position(|v| *v == self.view)
+            .map_or(first, |i| order[(i + 1) % order.len()]);
         self.view = next;
         self.last_switch_ms = now;
     }
 
-    pub(crate) fn screen(&self, env: &Env) -> Screen {
+    /// `rotate_views` resolved to existing views, without repeats.
+    fn rotation_order(&self) -> Vec<ViewId> {
+        let mut order = Vec::new();
+        for name in &self.settings.rotate_views {
+            let views = if name == ALL_SCREENS {
+                self.screens
+                    .ordered()
+                    .into_iter()
+                    .map(ViewId::Screen)
+                    .collect()
+            } else {
+                self.view_by_name(name).into_iter().collect::<Vec<_>>()
+            };
+            for v in views {
+                if !order.contains(&v) {
+                    order.push(v);
+                }
+            }
+        }
+        order
+    }
+
+    pub(crate) const fn showing(&self, env: &Env) -> Showing {
         if self.calibrate.is_some() {
-            Screen::Calibrate
+            Showing::Calibrate
         } else if self.menu_open {
-            Screen::Menu
+            Showing::Menu
         } else if matches!(env.net, NetState::Setup { .. }) && !self.setup_dismissed {
-            Screen::WifiSetup
+            Showing::WifiSetup
         } else {
-            Screen::View(self.view)
+            Showing::View(self.view)
         }
     }
 
     fn on_gesture(&mut self, gesture: Gesture, env: &Env) {
-        match self.screen(env) {
-            Screen::Calibrate => {}
-            Screen::WifiSetup => match gesture {
+        match self.showing(env) {
+            Showing::Calibrate => {}
+            Showing::WifiSetup => match gesture {
                 Gesture::Tap(_) => self.setup_dismissed = true,
                 Gesture::LongPress(_) => self.menu_open = true,
                 Gesture::Swipe(_) => {}
             },
-            Screen::Menu => {
+            Showing::Menu => {
                 if let Gesture::Tap(p) = gesture {
                     views::menu::tap(self, p);
                 }
             }
-            Screen::View(_) => match gesture {
+            Showing::View(_) => match gesture {
                 Gesture::LongPress(_) => {
                     self.menu_open = true;
                     self.menu_confirm_wifi = false;
                 }
-                Gesture::Swipe(Dir::Left) => self.step_view(1, env.now_ms),
-                Gesture::Swipe(Dir::Right) => self.step_view(ViewId::ALL.len() - 1, env.now_ms),
+                Gesture::Swipe(Dir::Left) => self.step_view(true, env.now_ms),
+                Gesture::Swipe(Dir::Right) => self.step_view(false, env.now_ms),
                 Gesture::Swipe(_) | Gesture::Tap(_) => {}
             },
         }
     }
 
-    fn step_view(&mut self, by: usize, now_ms: u64) {
-        let view = ViewId::ALL[(self.view.index() + by) % ViewId::ALL.len()];
-        self.set_view(view, now_ms);
+    fn step_view(&mut self, forward: bool, now_ms: u64) {
+        let order = self.nav_order();
+        let i = order.iter().position(|v| *v == self.view).unwrap_or(0);
+        let n = order.len();
+        let next = if forward {
+            (i + 1) % n
+        } else {
+            (i + n - 1) % n
+        };
+        self.set_view(order[next], now_ms);
     }
 
     pub(crate) fn start_calibration(&mut self) {
@@ -346,48 +492,62 @@ impl App {
 
     // ---------------------------------------------------------------- draw
 
-    fn regions(&self, screen: Screen, env: &Env) -> Vec<Region> {
-        match screen {
-            Screen::Calibrate => views::setup::calibrate_regions(self),
-            Screen::WifiSetup => views::setup::wifi_regions(env),
-            Screen::Menu => views::menu::regions(self, env),
-            Screen::View(view) => {
+    /// Position of the current view in swipe order, and how many there are.
+    fn nav_position(&self) -> (usize, usize) {
+        let order = self.nav_order();
+        let i = order.iter().position(|v| *v == self.view).unwrap_or(0);
+        (i, order.len())
+    }
+
+    fn regions(&self, showing: Showing, env: &Env) -> Vec<Region> {
+        match showing {
+            Showing::Calibrate => views::setup::calibrate_regions(self),
+            Showing::WifiSetup => views::setup::wifi_regions(env),
+            Showing::Menu => views::menu::regions(self, env),
+            Showing::View(view) => {
                 let mut regions = match view {
                     ViewId::Home => views::home::regions(self, env),
                     ViewId::Forecast => views::forecast::regions(self),
                     ViewId::Calendar => views::calendar::regions(self, env),
+                    ViewId::Screen(slot) => views::custom::regions(self, slot, env),
                 };
-                regions.push(views::nav_region(view));
+                let (i, n) = self.nav_position();
+                regions.push(views::nav_region(i, n));
                 regions
             }
         }
     }
 
-    fn paint(&self, screen: Screen, c: &mut Canvas<'_>, env: &Env, theme: &Theme) {
+    fn paint(&self, showing: Showing, c: &mut Canvas<'_>, env: &Env, theme: &Theme) {
         gfx::fill(c, self::screen(), theme.bg);
-        match screen {
-            Screen::Calibrate => views::setup::paint_calibrate(self, c, theme),
-            Screen::WifiSetup => views::setup::paint_wifi(c, env, theme),
-            Screen::Menu => views::menu::paint(self, c, env, theme),
-            Screen::View(view) => {
+        match showing {
+            Showing::Calibrate => views::setup::paint_calibrate(self, c, theme),
+            Showing::WifiSetup => views::setup::paint_wifi(c, env, theme),
+            Showing::Menu => views::menu::paint(self, c, env, theme),
+            Showing::View(view) => {
                 match view {
                     ViewId::Home => views::home::paint(self, c, env, theme),
                     ViewId::Forecast => views::forecast::paint(self, c, theme),
                     ViewId::Calendar => views::calendar::paint(self, c, env, theme),
+                    ViewId::Screen(slot) => views::custom::paint(self, slot, c, env, theme),
                 }
-                views::paint_nav(c, view, theme);
+                let (i, n) = self.nav_position();
+                views::paint_nav(c, i, n, theme);
             }
         }
     }
 
     /// Makes the next [`App::draw`] repaint the whole screen, e.g. after the
     /// display was re-initialised.
-    pub fn invalidate(&mut self) {
+    pub const fn invalidate(&mut self) {
         self.cache_screen = None;
     }
 
     /// Repaints whatever changed since the last call. The first call, a
     /// change of screen and a change of theme repaint everything.
+    ///
+    /// # Errors
+    /// When the display fails; the next call repaints what is missing.
     pub fn draw<D>(&mut self, display: &mut D, env: &Env) -> Result<(), D::Error>
     where
         D: DrawTarget<Color = Rgb565>,
@@ -395,16 +555,16 @@ impl App {
         if self.asleep {
             return Ok(());
         }
-        let screen = self.screen(env);
+        let showing = self.showing(env);
         let theme = self.theme();
-        let regions = self.regions(screen, env);
-        let cache_id = Some((screen, theme.key()));
+        let regions = self.regions(showing, env);
+        let cache_id = Some((showing, theme.key()));
         let full = self.cache_screen != cache_id || self.cache.len() != regions.len();
 
         let mut buf = std::mem::take(&mut self.buf);
         let mut paint = |rect: Rectangle| {
             gfx::render(display, &mut buf, rect, |c| {
-                self.paint(screen, c, env, &theme)
+                self.paint(showing, c, env, &theme);
             })
         };
         let result = if full {
@@ -446,11 +606,11 @@ mod tests {
         }
     }
 
-    fn rotating(views: Vec<ViewId>) -> App {
+    fn rotating(views: &[&str]) -> App {
         let settings = Settings {
             rotate: true,
             rotate_secs: 10,
-            rotate_views: views,
+            rotate_views: views.iter().map(|v| (*v).to_owned()).collect(),
             sleep_secs: 0,
             ..Settings::default()
         };
@@ -474,7 +634,7 @@ mod tests {
 
     #[test]
     fn rotation_follows_the_list() {
-        let mut a = rotating(vec![ViewId::Home, ViewId::Calendar, ViewId::Forecast]);
+        let mut a = rotating(&["home", "calendar", "forecast"]);
         // Nothing happens during the first minute (counts as recent touch).
         let seen = run(&mut a, 0, 95_000, 12);
         assert_eq!(
@@ -490,14 +650,14 @@ mod tests {
 
     #[test]
     fn rotation_from_a_view_outside_the_list_starts_at_the_beginning() {
-        let mut a = rotating(vec![ViewId::Calendar, ViewId::Forecast]);
+        let mut a = rotating(&["calendar", "forecast"]);
         assert_eq!(a.view(), ViewId::Home);
         assert_eq!(run(&mut a, 0, 61_000, 12), [(60, ViewId::Calendar)]);
     }
 
     #[test]
     fn rotation_pauses_after_touch_and_outside_its_hours() {
-        let mut a = rotating(ViewId::ALL.to_vec());
+        let mut a = rotating(&["home", "forecast", "calendar"]);
         run(&mut a, 0, 70_000, 12);
         // A tap pauses rotation for a minute.
         a.tick(&env_at(70_000, 12), Some(RawTouch { x: 10, y: 10 }));
@@ -515,7 +675,7 @@ mod tests {
 
     #[test]
     fn swipes_move_between_views() {
-        let mut a = rotating(ViewId::ALL.to_vec());
+        let mut a = rotating(&["home", "forecast", "calendar"]);
         a.settings.rotate = false;
         let swipe = |a: &mut App, t: u64, from: (i32, i32), to: (i32, i32)| {
             for i in 0..=5u64 {

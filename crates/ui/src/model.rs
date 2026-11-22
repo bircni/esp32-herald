@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 pub const SCREEN_W: i32 = 480;
 pub const SCREEN_H: i32 = 320;
 
+#[must_use]
 pub const fn screen() -> embedded_graphics::primitives::Rectangle {
     embedded_graphics::primitives::Rectangle::new(
         Point::new(0, 0),
@@ -13,34 +14,42 @@ pub const fn screen() -> embedded_graphics::primitives::Rectangle {
     )
 }
 
-/// The swipeable views, in navigation order.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
+/// A view: one of the built-in ones, or a custom screen by its slot in
+/// [`crate::screen::Screens`]. Names are resolved by the app, as custom
+/// screens come and go.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ViewId {
     Home,
     Forecast,
     Calendar,
+    Screen(u8),
 }
 
 impl ViewId {
-    pub const ALL: [ViewId; 3] = [ViewId::Home, ViewId::Forecast, ViewId::Calendar];
+    /// The built-in views, in navigation order.
+    pub const BUILT_IN: [Self; 3] = [Self::Home, Self::Forecast, Self::Calendar];
 
-    pub fn index(self) -> usize {
-        Self::ALL.iter().position(|v| *v == self).unwrap_or(0)
-    }
-
-    pub fn name(self) -> &'static str {
+    /// The name of a built-in view; custom screens are named by the app.
+    #[must_use]
+    pub const fn built_in_name(self) -> Option<&'static str> {
         match self {
-            ViewId::Home => "home",
-            ViewId::Forecast => "forecast",
-            ViewId::Calendar => "calendar",
+            Self::Home => Some("home"),
+            Self::Forecast => Some("forecast"),
+            Self::Calendar => Some("calendar"),
+            Self::Screen(_) => None,
         }
     }
 
-    pub fn from_name(name: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|v| v.name() == name)
+    #[must_use]
+    pub fn built_in(name: &str) -> Option<Self> {
+        Self::BUILT_IN
+            .into_iter()
+            .find(|v| v.built_in_name() == Some(name))
     }
 }
+
+/// In `rotate_views`: all custom screens, in name order.
+pub const ALL_SCREENS: &str = "screens";
 
 /// Colour of the dot in front of a feed item. Also its urgency: items are
 /// listed in this order.
@@ -82,31 +91,49 @@ pub enum Led {
 
 impl Led {
     /// (red, green, blue) channels that should be lit.
-    pub fn channels(self) -> (bool, bool, bool) {
+    #[must_use]
+    pub const fn channels(self) -> (bool, bool, bool) {
         match self {
-            Led::Off => (false, false, false),
-            Led::Red => (true, false, false),
-            Led::Green => (false, true, false),
-            Led::Blue => (false, false, true),
-            Led::Yellow => (true, true, false),
-            Led::Cyan => (false, true, true),
-            Led::Magenta => (true, false, true),
-            Led::White => (true, true, true),
+            Self::Off => (false, false, false),
+            Self::Red => (true, false, false),
+            Self::Green => (false, true, false),
+            Self::Blue => (false, false, true),
+            Self::Yellow => (true, true, false),
+            Self::Cyan => (false, true, true),
+            Self::Magenta => (true, false, true),
+            Self::White => (true, true, true),
         }
     }
 }
 
+/// Longest accepted hostname. ESP-IDF reads it back into 30 bytes.
+pub const HOSTNAME_MAX: usize = 30;
+
+/// A single DNS label (RFC 1123), short enough for ESP-IDF.
+#[must_use]
+pub fn valid_hostname(name: &str) -> bool {
+    (1..=HOSTNAME_MAX).contains(&name.len())
+        && !name.starts_with('-')
+        && !name.ends_with('-')
+        && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+}
+
+/// A host name or IP address, at most 64 characters; may be empty.
+fn valid_host(host: &str) -> bool {
+    host.len() <= 64
+        && host
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || ".-_:".contains(c))
+}
+
 /// User settings. Persisted as JSON and exposed through `/api/settings`.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
     /// POSIX TZ string, e.g. `CET-1CEST,M3.5.0,M10.5.0/3`.
     pub timezone: String,
-    /// Display name of the weather location. Empty disables weather.
-    pub location: String,
-    // f64 rather than f32, see `de_f32`.
-    pub latitude: f64,
-    pub longitude: f64,
+    /// Time server, host name or IP address.
+    pub ntp_server: String,
     pub theme: ThemeKind,
     /// Accent colour as `#RRGGBB`.
     pub accent_color: String,
@@ -114,24 +141,36 @@ pub struct Settings {
     pub brightness: u8,
     /// Seconds without touch until the display sleeps. 0 = never.
     pub sleep_secs: u32,
-    /// Optional shared secret required in the `X-Buddy-Token` header.
+    /// Optional shared secret required in the `X-Herald-Token` header.
     pub token: String,
+    /// Network name: sent to the router over DHCP and announced over mDNS
+    /// as `<hostname>.local`.
+    pub hostname: String,
     /// Step through `rotate_views` on its own.
     pub rotate: bool,
     /// Seconds each view is shown while rotating (5..=3600).
     pub rotate_secs: u32,
-    /// Views to rotate through, in this order.
-    pub rotate_views: Vec<ViewId>,
+    /// Views to rotate through, in this order: built-in view names, custom
+    /// screen names, or `screens` for all custom screens. Names of screens
+    /// that do not exist (yet) are skipped.
+    pub rotate_views: Vec<String>,
     /// Local time window (`HH:MM`) in which rotation runs. Equal values
     /// mean all day; `from` after `until` wraps past midnight.
     pub rotate_from: String,
     pub rotate_until: String,
+    /// Dim the display or turn it off between `night_from` and
+    /// `night_until` (local time; may wrap past midnight).
+    pub night: bool,
+    pub night_from: String,
+    pub night_until: String,
+    /// Backlight during the night in percent; 0 turns the display off.
+    pub night_brightness: u8,
     /// MQTT broker host name or address. Empty switches MQTT off.
     pub mqtt_host: String,
     pub mqtt_port: u16,
     pub mqtt_user: String,
     pub mqtt_password: String,
-    /// Topic prefix, e.g. `deskbuddy` for `deskbuddy/item/<id>`.
+    /// Topic prefix, e.g. `herald` for `herald/item/<id>`.
     pub mqtt_prefix: String,
 }
 
@@ -139,29 +178,37 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             timezone: "CET-1CEST,M3.5.0,M10.5.0/3".into(),
-            location: String::new(),
-            latitude: 0.0,
-            longitude: 0.0,
+            ntp_server: "pool.ntp.org".into(),
             theme: ThemeKind::Dark,
             accent_color: "#35D0FF".into(),
             brightness: 80,
             sleep_secs: 300,
             token: String::new(),
+            hostname: "herald".into(),
             rotate: false,
             rotate_secs: 20,
-            rotate_views: ViewId::ALL.to_vec(),
+            rotate_views: ["home", "forecast", "calendar", ALL_SCREENS]
+                .map(str::to_owned)
+                .to_vec(),
             rotate_from: "00:00".into(),
             rotate_until: "00:00".into(),
+            night: false,
+            night_from: "22:00".into(),
+            night_until: "07:00".into(),
+            night_brightness: 0,
             mqtt_host: String::new(),
             mqtt_port: 1883,
             mqtt_user: String::new(),
             mqtt_password: String::new(),
-            mqtt_prefix: "deskbuddy".into(),
+            mqtt_prefix: "herald".into(),
         }
     }
 }
 
 impl Settings {
+    ///
+    /// # Errors
+    /// A message naming the first invalid setting.
     pub fn validate(&self) -> Result<(), String> {
         if self.timezone.is_empty() || self.timezone.len() > 64 {
             return Err("timezone must be 1..=64 characters".into());
@@ -172,12 +219,6 @@ impl Settings {
             .all(|c| c.is_ascii_alphanumeric() || "+-,./:<>".contains(c))
         {
             return Err("timezone contains invalid characters".into());
-        }
-        if self.location.chars().count() > 40 {
-            return Err("location must be at most 40 characters".into());
-        }
-        if !(-90.0..=90.0).contains(&self.latitude) || !(-180.0..=180.0).contains(&self.longitude) {
-            return Err("latitude/longitude out of range".into());
         }
         if parse_hex_color(&self.accent_color).is_none() {
             return Err("accent_color must look like #RRGGBB".into());
@@ -191,6 +232,11 @@ impl Settings {
         if self.token.len() > 64 || !self.token.chars().all(|c| c.is_ascii_graphic()) {
             return Err("token must be at most 64 printable ASCII characters".into());
         }
+        if !valid_hostname(&self.hostname) {
+            return Err(format!(
+                "hostname must be 1..={HOSTNAME_MAX} of a-z, A-Z, 0-9 and '-', not starting or ending with '-'"
+            ));
+        }
         if !(5..=3600).contains(&self.rotate_secs) {
             return Err("rotate_secs must be 5..=3600".into());
         }
@@ -198,19 +244,26 @@ impl Settings {
             return Err("rotate_views must name at least one view".into());
         }
         for (i, v) in self.rotate_views.iter().enumerate() {
+            if ViewId::built_in(v).is_none() && v != ALL_SCREENS && !crate::screen::valid_name(v) {
+                return Err(format!("rotate_views: {v:?} is not a view or screen name"));
+            }
             if self.rotate_views[..i].contains(v) {
-                return Err(format!("rotate_views lists {} twice", v.name()));
+                return Err(format!("rotate_views lists {v} twice"));
             }
         }
         if parse_hhmm(&self.rotate_from).is_none() || parse_hhmm(&self.rotate_until).is_none() {
             return Err("rotate_from and rotate_until must look like HH:MM".into());
         }
-        let host_ok = self.mqtt_host.len() <= 64
-            && self
-                .mqtt_host
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || ".-_:".contains(c));
-        if !host_ok {
+        if parse_hhmm(&self.night_from).is_none() || parse_hhmm(&self.night_until).is_none() {
+            return Err("night_from and night_until must look like HH:MM".into());
+        }
+        if self.night_brightness > 100 {
+            return Err("night_brightness must be 0..=100".into());
+        }
+        if self.ntp_server.is_empty() || !valid_host(&self.ntp_server) {
+            return Err("ntp_server must be a host name or IP address".into());
+        }
+        if !valid_host(&self.mqtt_host) {
             return Err("mqtt_host must be a host name or IP address".into());
         }
         if self.mqtt_port == 0 {
@@ -238,34 +291,42 @@ impl Settings {
         Ok(())
     }
 
-    pub fn has_location(&self) -> bool {
-        !self.location.is_empty()
-    }
-
     /// Whether the rotation window includes `t`. Without a synchronised
     /// clock only an all-day window counts as open.
+    #[must_use]
     pub fn in_rotate_window(&self, t: Option<&LocalTime>) -> bool {
-        let (Some(from), Some(until)) = (
-            parse_hhmm(&self.rotate_from),
-            parse_hhmm(&self.rotate_until),
-        ) else {
-            return false;
-        };
-        if from == until {
-            return true;
-        }
-        let Some(now) = t.map(LocalTime::minute_of_day) else {
-            return false;
-        };
-        if from < until {
-            (from..until).contains(&now)
-        } else {
-            now >= from || now < until
-        }
+        in_window(&self.rotate_from, &self.rotate_until, t).unwrap_or(false)
+    }
+
+    /// Whether night mode applies at `t`. Needs a synchronised clock, and
+    /// equal times mean no night.
+    #[must_use]
+    pub fn is_night(&self, t: Option<&LocalTime>) -> bool {
+        self.night
+            && self.night_from != self.night_until
+            && in_window(&self.night_from, &self.night_until, t) == Some(true)
     }
 }
 
+/// Whether `t` lies in the window `from..until` (`HH:MM`, wrapping past
+/// midnight when `from` is later). Equal times cover the whole day. `None`
+/// when the times are invalid, or when the window is not the whole day and
+/// the clock is not synchronised.
+fn in_window(from: &str, until: &str, t: Option<&LocalTime>) -> Option<bool> {
+    let (from, until) = (parse_hhmm(from)?, parse_hhmm(until)?);
+    if from == until {
+        return Some(true);
+    }
+    let now = t?.minute_of_day();
+    Some(if from < until {
+        (from..until).contains(&now)
+    } else {
+        now >= from || now < until
+    })
+}
+
 /// Parses `HH:MM` into minutes since midnight.
+#[must_use]
 pub fn parse_hhmm(s: &str) -> Option<u16> {
     let (h, m) = s.split_once(':')?;
     if h.len() != 2 || m.len() != 2 {
@@ -276,13 +337,14 @@ pub fn parse_hhmm(s: &str) -> Option<u16> {
 }
 
 /// Parses `#RRGGBB` into an RGB565 colour.
-pub fn parse_hex_color(s: &str) -> Option<Rgb565> {
-    let hex = s.strip_prefix('#')?;
+#[must_use]
+pub fn parse_hex_color(text: &str) -> Option<Rgb565> {
+    let hex = text.strip_prefix('#')?;
     if hex.len() != 6 || !hex.is_ascii() {
         return None;
     }
-    let v = u32::from_str_radix(hex, 16).ok()?;
-    let (r, g, b) = ((v >> 16) as u8, (v >> 8) as u8, v as u8);
+    let value = u32::from_str_radix(hex, 16).ok()?;
+    let (r, g, b) = ((value >> 16) as u8, (value >> 8) as u8, value as u8);
     Some(Rgb565::new(r >> 3, g >> 2, b >> 3))
 }
 
@@ -296,7 +358,7 @@ pub struct RawTouch {
 /// Deserialises an `f32` by way of `f64`.
 ///
 /// serde's own `f32` visitor makes the Xtensa LLVM backend of the ESP Rust
-/// toolchain abort ("Cannot select: XtensaISD::PCREL_WRAPPER"), so no type
+/// toolchain abort ("Cannot select: `XtensaISD::PCREL_WRAPPER`"), so no type
 /// in this crate may derive `Deserialize` for a bare `f32` field.
 pub(crate) fn de_f32<'de, D: serde::Deserializer<'de>>(d: D) -> Result<f32, D::Error> {
     f64::deserialize(d).map(|v| v as f32)
@@ -322,7 +384,8 @@ pub struct Calibration {
 
 impl Calibration {
     /// Raw values already are screen coordinates (used by the simulator).
-    pub fn identity() -> Self {
+    #[must_use]
+    pub const fn identity() -> Self {
         Self {
             swap_xy: false,
             ax: 1.0,
@@ -333,10 +396,12 @@ impl Calibration {
         }
     }
 
+    #[must_use]
     pub fn fits_screen(&self) -> bool {
         self.screen == (SCREEN_W, SCREEN_H)
     }
 
+    #[must_use]
     pub fn map(&self, raw: RawTouch) -> Point {
         let (rx, ry) = if self.swap_xy {
             (raw.y, raw.x)
@@ -350,6 +415,7 @@ impl Calibration {
 
     /// Derives a calibration from the four corner targets, given in the order
     /// top-left, top-right, bottom-right, bottom-left.
+    #[must_use]
     pub fn from_corners(targets: &[Point; 4], raw: &[RawTouch; 4]) -> Option<Self> {
         let f = |v: u16| f32::from(v);
         // Does the raw X axis follow the screen X axis, or the screen Y axis?
@@ -365,10 +431,10 @@ impl Calibration {
         };
         let r = [pick(raw[0]), pick(raw[1]), pick(raw[2]), pick(raw[3])];
 
-        let left = (r[0].0 + r[3].0) / 2.0;
-        let right = (r[1].0 + r[2].0) / 2.0;
-        let top = (r[0].1 + r[1].1) / 2.0;
-        let bottom = (r[2].1 + r[3].1) / 2.0;
+        let left = f32::midpoint(r[0].0, r[3].0);
+        let right = f32::midpoint(r[1].0, r[2].0);
+        let top = f32::midpoint(r[0].1, r[1].1);
+        let bottom = f32::midpoint(r[2].1, r[3].1);
         // The corners must be clearly apart, otherwise the taps were bogus.
         if (right - left).abs() < 500.0 || (bottom - top).abs() < 500.0 {
             return None;
@@ -389,6 +455,7 @@ impl Calibration {
 }
 
 /// 0 = Monday .. 6 = Sunday, for any Gregorian date.
+#[must_use]
 pub fn weekday_of(year: u16, month: u8, day: u8) -> u8 {
     // Sakamoto's method, which counts from Sunday.
     const T: [i32; 12] = [0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4];
@@ -405,11 +472,13 @@ pub fn weekday_of(year: u16, month: u8, day: u8) -> u8 {
 }
 
 /// `Mon` .. `Sun`, for 0 = Monday.
+#[must_use]
 pub fn weekday_abbr(weekday: u8) -> &'static str {
     ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][usize::from(weekday) % 7]
 }
 
-pub fn days_in_month(year: u16, month: u8) -> u8 {
+#[must_use]
+pub const fn days_in_month(year: u16, month: u8) -> u8 {
     match month {
         4 | 6 | 9 | 11 => 30,
         2 if year.is_multiple_of(4) && (!year.is_multiple_of(100) || year.is_multiple_of(400)) => {
@@ -436,6 +505,7 @@ pub struct LocalTime {
 }
 
 impl LocalTime {
+    #[must_use]
     pub fn weekday_name(&self) -> &'static str {
         const NAMES: [&str; 7] = [
             "Monday",
@@ -449,6 +519,7 @@ impl LocalTime {
         NAMES[usize::from(self.weekday) % 7]
     }
 
+    #[must_use]
     pub fn month_name(&self) -> &'static str {
         const NAMES: [&str; 12] = [
             "January",
@@ -468,15 +539,18 @@ impl LocalTime {
     }
 
     /// e.g. `19 November 2026`
+    #[must_use]
     pub fn date_string(&self) -> String {
         format!("{} {} {}", self.day, self.month_name(), self.year)
     }
 
+    #[must_use]
     pub fn minute_of_day(&self) -> u16 {
         u16::from(self.hour) * 60 + u16::from(self.minute)
     }
 
     /// 1 for 1 January.
+    #[must_use]
     pub fn day_of_year(&self) -> u16 {
         (1..self.month)
             .map(|m| u16::from(days_in_month(self.year, m)))
@@ -485,13 +559,14 @@ impl LocalTime {
     }
 
     /// ISO 8601 week number.
+    #[must_use]
     pub fn iso_week(&self) -> u8 {
         let thursday = i32::from(self.day_of_year()) - i32::from(self.weekday) + 3;
         let year_days = |y: u16| if days_in_month(y, 2) == 29 { 366 } else { 365 };
         if thursday < 1 {
             // Belongs to the last week of the previous year.
             let prev = self.year - 1;
-            let dec31 = LocalTime {
+            let dec31 = Self {
                 year: prev,
                 month: 12,
                 day: 31,
@@ -517,7 +592,7 @@ pub enum NetState {
     Connected {
         ip: String,
     },
-    /// The device runs its own access point and waits for WiFi credentials.
+    /// The device runs its own access point and waits for `WiFi` credentials.
     Setup {
         ssid: String,
         password: String,
@@ -539,6 +614,12 @@ pub struct Env {
     pub unix_s: Option<i64>,
     /// `None` while MQTT is switched off, else whether the broker is connected.
     pub mqtt: Option<bool>,
+    /// Signal strength of the `WiFi` connection in dBm.
+    pub rssi: Option<i8>,
+    /// Free heap in bytes, where the platform knows it.
+    pub heap_free: Option<u32>,
+    /// The firmware slot running now, e.g. `ota_0`; `None` without OTA.
+    pub firmware_slot: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -553,13 +634,21 @@ pub enum Effect {
     SaveSettings,
     SaveCalibration(Calibration),
     Beep(Beep),
-    /// Forget the WiFi credentials and open the setup access point.
+    /// Forget the `WiFi` credentials and open the setup access point.
     StartWifiSetup,
-    /// Store new WiFi credentials and reconnect.
+    /// Store new `WiFi` credentials and reconnect.
     SetWifi {
         ssid: String,
         password: String,
     },
+    /// Publish a custom screen retained on `<prefix>/screen/<name>`, so the
+    /// broker keeps it; `None` clears it. Only for screens that came in
+    /// over HTTP: those from MQTT are already on the broker.
+    PublishScreen {
+        name: String,
+        payload: Option<String>,
+    },
+    Restart,
 }
 
 #[cfg(test)]
@@ -590,9 +679,6 @@ mod tests {
         assert!(s.validate().is_err());
         let mut s = ok.clone();
         s.timezone = "CET; rm -rf".into();
-        assert!(s.validate().is_err());
-        let mut s = ok.clone();
-        s.latitude = 91.0;
         assert!(s.validate().is_err());
         let mut s = ok.clone();
         s.accent_color = "blue".into();
@@ -735,6 +821,28 @@ mod tests {
     }
 
     #[test]
+    fn night_window() {
+        let at = |hour, minute| LocalTime {
+            year: 2026,
+            month: 11,
+            day: 22,
+            weekday: 6,
+            hour,
+            minute,
+            second: 0,
+        };
+        let mut s = Settings::default();
+        assert!(!s.is_night(Some(&at(23, 0))), "off by default");
+        s.night = true;
+        assert!(s.is_night(Some(&at(23, 0))));
+        assert!(s.is_night(Some(&at(6, 59))));
+        assert!(!s.is_night(Some(&at(7, 0))));
+        assert!(!s.is_night(None), "no night without a clock");
+        s.night_until = s.night_from.clone();
+        assert!(!s.is_night(Some(&at(23, 0))), "equal times mean no night");
+    }
+
+    #[test]
     fn rotate_window() {
         let at = |h: u8, m: u8| LocalTime {
             hour: h,
@@ -765,7 +873,7 @@ mod tests {
     fn mqtt_settings_are_validated() {
         let ok = Settings {
             mqtt_host: "192.168.1.10".into(),
-            mqtt_prefix: "home/office/buddy".into(),
+            mqtt_prefix: "home/office/herald".into(),
             ..Settings::default()
         };
         assert_eq!(ok.validate(), Ok(()));
@@ -787,28 +895,70 @@ mod tests {
                 ..ok.clone()
             },
             Settings {
-                mqtt_prefix: "buddy/#".into(),
+                mqtt_prefix: "herald/#".into(),
                 ..ok.clone()
             },
             Settings {
-                mqtt_prefix: "buddy/+/x".into(),
+                mqtt_prefix: "herald/+/x".into(),
                 ..ok.clone()
             },
             Settings {
-                mqtt_prefix: "/buddy".into(),
+                mqtt_prefix: "/herald".into(),
                 ..ok.clone()
             },
             Settings {
-                mqtt_prefix: "buddy/".into(),
+                mqtt_prefix: "herald/".into(),
                 ..ok.clone()
             },
             Settings {
                 mqtt_prefix: "a//b".into(),
-                ..ok.clone()
+                ..ok
             },
         ] {
             assert!(broken.validate().is_err(), "{broken:?}");
         }
+    }
+
+    #[test]
+    fn ntp_server_must_be_a_host() {
+        for ok in ["pool.ntp.org", "192.168.1.1", "fritz.box"] {
+            let s = Settings {
+                ntp_server: ok.into(),
+                ..Settings::default()
+            };
+            assert_eq!(s.validate(), Ok(()), "{ok}");
+        }
+        for bad in ["", "ntp server", "a/b"] {
+            let s = Settings {
+                ntp_server: bad.into(),
+                ..Settings::default()
+            };
+            assert!(s.validate().is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn hostnames_are_single_dns_labels() {
+        for ok in ["herald", "Desk-Herald-2", "a", &"x".repeat(HOSTNAME_MAX)] {
+            assert!(valid_hostname(ok), "{ok}");
+        }
+        for bad in [
+            "",
+            "-herald",
+            "herald-",
+            "desk herald",
+            "desk.herald",
+            "desk_herald",
+            "büddy",
+            &"x".repeat(HOSTNAME_MAX + 1),
+        ] {
+            assert!(!valid_hostname(bad), "{bad}");
+        }
+        let s = Settings {
+            hostname: "desk.herald".into(),
+            ..Settings::default()
+        };
+        assert!(s.validate().is_err());
     }
 
     #[test]
@@ -821,8 +971,14 @@ mod tests {
         s.rotate_views.clear();
         assert!(s.validate().is_err());
         let mut s = ok.clone();
-        s.rotate_views = vec![ViewId::Home, ViewId::Home];
+        s.rotate_views = vec!["home".into(), "home".into()];
         assert!(s.validate().is_err());
+        let mut s = ok.clone();
+        s.rotate_views = vec!["Not A Name".into()];
+        assert!(s.validate().is_err());
+        let mut s = ok.clone();
+        s.rotate_views = vec!["home".into(), "energy".into(), "screens".into()];
+        assert_eq!(s.validate(), Ok(()), "screen names and 'screens' are fine");
         let mut s = ok;
         s.rotate_until = "25:00".into();
         assert!(s.validate().is_err());
@@ -830,9 +986,15 @@ mod tests {
 
     #[test]
     fn settings_from_older_firmware_load_with_defaults() {
-        let s: Settings = serde_json::from_str(r#"{"brightness":40}"#).unwrap();
+        // Settings that no longer exist are ignored.
+        let s: Settings = serde_json::from_str(
+            r#"{"brightness":40,"location":"Berlin","latitude":52.5,"longitude":13.4}"#,
+        )
+        .unwrap();
         assert_eq!(s.brightness, 40);
-        assert_eq!(s.rotate_views, ViewId::ALL.to_vec());
+        assert_eq!(s.hostname, "herald");
+        assert_eq!(s.rotate_views, ["home", "forecast", "calendar", "screens"]);
+        assert!(!s.night);
         assert_eq!(s.validate(), Ok(()));
     }
 }

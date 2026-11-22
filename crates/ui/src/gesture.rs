@@ -49,16 +49,18 @@ fn travel(a: Point, b: Point) -> i32 {
 }
 
 impl Recognizer {
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
     /// Forgets the current press without emitting anything.
-    pub fn reset(&mut self) {
+    pub const fn reset(&mut self) {
         self.press = None;
     }
 
-    pub fn is_pressed(&self) -> bool {
+    #[must_use]
+    pub const fn is_pressed(&self) -> bool {
         self.press.is_some()
     }
 
@@ -104,11 +106,7 @@ impl Recognizer {
                 let (dx, dy) = (end.x - press.start.x, end.y - press.start.y);
                 if dx.abs().max(dy.abs()) >= SWIPE_MIN {
                     Some(Gesture::Swipe(if dx.abs() > dy.abs() {
-                        if dx > 0 {
-                            Dir::Right
-                        } else {
-                            Dir::Left
-                        }
+                        if dx > 0 { Dir::Right } else { Dir::Left }
                     } else if dy > 0 {
                         Dir::Down
                     } else {

@@ -1,10 +1,10 @@
 use embedded_graphics::{prelude::*, primitives::Rectangle};
 
-use super::{contains, region, Region};
+use super::{Region, contains, region};
 use crate::{
     app::App,
     gfx::{self, Align, Canvas, Font},
-    model::{screen, Effect, Env, NetState, ThemeKind},
+    model::{Effect, Env, NetState, ThemeKind, screen},
     theme::Theme,
 };
 
@@ -46,7 +46,7 @@ pub(crate) fn paint(app: &App, c: &mut Canvas<'_>, env: &Env, theme: &Theme) {
         Align::Left,
         theme.fg,
     );
-    let version = format!("deskbuddy {}", crate::VERSION);
+    let version = format!("Herald {}", crate::VERSION);
     gfx::text(
         c,
         Font::Small,

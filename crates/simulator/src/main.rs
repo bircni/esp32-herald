@@ -5,7 +5,7 @@
 //! cargo run -p simulator                      # window + http://127.0.0.1:8080
 //! cargo run -p simulator -- --calibrate       # start with the calibration screen
 //! cargo run -p simulator -- --setup           # start in WiFi setup mode
-//! cargo run -p simulator -- --demo            # sample feed items and a location
+//! cargo run -p simulator -- --demo            # sample feed items and weather
 //! cargo run -p simulator -- --screenshots DIR # render every screen to PNG, no window
 //! ```
 
@@ -14,8 +14,8 @@ use std::{
     io::Read,
     path::{Path, PathBuf},
     sync::{
+        Arc, Mutex, PoisonError,
         atomic::{AtomicBool, Ordering},
-        Arc, Mutex,
     },
     thread,
     time::{Duration, Instant},
@@ -24,13 +24,31 @@ use std::{
 use chrono::{Datelike, Local, Timelike};
 use embedded_graphics::{pixelcolor::Rgb565, prelude::*};
 use embedded_graphics_simulator::{
-    sdl2::MouseButton, OutputSettings, OutputSettingsBuilder, SimulatorDisplay, SimulatorEvent,
-    Window,
+    OutputSettings, OutputSettingsBuilder, SimulatorDisplay, SimulatorEvent, Window,
+    sdl2::MouseButton,
 };
 use ui::{
-    api, App, Calibration, Effect, Env, Led, LocalTime, NetState, RawTouch, Settings, SCREEN_H,
-    SCREEN_W,
+    App, Calibration, Effect, Env, Led, LocalTime, NetState, RawTouch, SCREEN_H, SCREEN_W,
+    Settings, api,
 };
+
+/// Prints a line like the firmware's log and keeps it for `/api/log`.
+macro_rules! say {
+    ($($arg:tt)*) => {{
+        let line = format!($($arg)*);
+        println!("{line}");
+        ui::logbuf::push(&line, false);
+    }};
+}
+
+/// Like [`say`], for warnings: also queued for `<prefix>/log`.
+macro_rules! warn {
+    ($($arg:tt)*) => {{
+        let line = format!($($arg)*);
+        eprintln!("{line}");
+        ui::logbuf::push(&line, true);
+    }};
+}
 
 const SETTINGS_FILE: &str = "sim-settings.json";
 const CALIBRATION_FILE: &str = "sim-calibration.json";
@@ -40,6 +58,8 @@ struct Shared {
     app: Mutex<App>,
     net: Mutex<NetState>,
     mqtt: Mutex<Option<bool>>,
+    /// Screens to publish retained on MQTT: name and payload (`None` clears).
+    outbox: Mutex<Vec<(String, Option<String>)>>,
     start: Instant,
     /// Where settings are stored; `None` keeps everything in memory.
     storage: Option<PathBuf>,
@@ -59,29 +79,43 @@ impl Shared {
                 minute: now.minute() as u8,
                 second: now.second() as u8,
             }),
-            net: self.net.lock().unwrap().clone(),
+            net: self
+                .net
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .clone(),
             unix_s: Some(now.timestamp()),
-            mqtt: *self.mqtt.lock().unwrap(),
+            mqtt: *self.mqtt.lock().unwrap_or_else(PoisonError::into_inner),
+            rssi: Some(-48),
+            heap_free: None,
+            firmware_slot: None,
         }
     }
 
-    /// Carries out what the firmware would do with NVS, the speaker and WiFi.
+    /// Carries out what the firmware would do with NVS, the speaker and `WiFi`.
     fn apply_effects(&self, app: &mut App) {
         for effect in app.take_effects() {
             match effect {
                 Effect::SaveSettings => {
-                    self.save(SETTINGS_FILE, &serde_json::json!(app.settings()))
+                    self.save(SETTINGS_FILE, &serde_json::json!(app.settings()));
                 }
                 Effect::SaveCalibration(c) => self.save(CALIBRATION_FILE, &serde_json::json!(c)),
-                Effect::Beep(beep) => println!("[speaker] {beep:?}"),
+                Effect::Beep(beep) => say!("[speaker] {beep:?}"),
                 Effect::StartWifiSetup => {
-                    println!("[wifi] credentials erased, setup access point opened");
-                    *self.net.lock().unwrap() = setup_net();
+                    say!("[wifi] credentials erased, setup access point opened");
+                    *self.net.lock().unwrap_or_else(PoisonError::into_inner) = setup_net();
                 }
                 Effect::SetWifi { ssid, .. } => {
-                    println!("[wifi] credentials for {ssid:?} saved, reconnecting");
-                    *self.net.lock().unwrap() = connected_net();
+                    say!("[wifi] credentials for {ssid:?} saved, reconnecting");
+                    *self.net.lock().unwrap_or_else(PoisonError::into_inner) = connected_net();
                 }
+                Effect::PublishScreen { name, payload } => {
+                    self.outbox
+                        .lock()
+                        .unwrap_or_else(PoisonError::into_inner)
+                        .push((name, payload));
+                }
+                Effect::Restart => say!("[system] restart requested (ignored in the simulator)"),
             }
         }
     }
@@ -102,7 +136,7 @@ fn connected_net() -> NetState {
 
 fn setup_net() -> NetState {
     NetState::Setup {
-        ssid: "Buddy-A1B2".into(),
+        ssid: "Herald-A1B2".into(),
         password: "k7mq2xwp".into(),
         ip: "192.168.71.1".into(),
     }
@@ -119,10 +153,13 @@ fn load<T: serde::de::DeserializeOwned>(dir: &Path, file: &str) -> Option<T> {
     }
 }
 
+#[expect(clippy::struct_excessive_bools, reason = "one per command-line flag")]
 struct Args {
     calibrate: bool,
     setup: bool,
     demo: bool,
+    /// No window: the app runs and draws off-screen, for tests.
+    headless: bool,
     port: u16,
     screenshots: Option<PathBuf>,
 }
@@ -132,6 +169,7 @@ fn parse_args() -> Result<Args, String> {
         calibrate: false,
         setup: false,
         demo: false,
+        headless: false,
         port: 8080,
         screenshots: None,
     };
@@ -141,6 +179,7 @@ fn parse_args() -> Result<Args, String> {
             "--calibrate" => args.calibrate = true,
             "--setup" => args.setup = true,
             "--demo" => args.demo = true,
+            "--headless" => args.headless = true,
             "--port" => {
                 let value = it.next().ok_or("--port needs a number")?;
                 args.port = value.parse().map_err(|_| format!("bad port: {value}"))?;
@@ -159,7 +198,7 @@ fn main() {
         Ok(a) => a,
         Err(e) => {
             eprintln!(
-                "{e}\nusage: simulator [--calibrate] [--setup] [--demo] [--port N] [--screenshots DIR]"
+                "{e}\nusage: simulator [--calibrate] [--setup] [--demo] [--headless] [--port N] [--screenshots DIR]"
             );
             std::process::exit(2);
         }
@@ -172,8 +211,11 @@ fn main() {
         return;
     }
 
-    let dir = PathBuf::from(".");
-    let settings: Settings = load(&dir, SETTINGS_FILE)
+    // Headless runs (tests) start from defaults and store nothing.
+    let storage = (!args.headless).then(|| PathBuf::from("."));
+    let settings: Settings = storage
+        .as_deref()
+        .and_then(|dir| load(dir, SETTINGS_FILE))
         .filter(|s: &Settings| s.validate().is_ok())
         .unwrap_or_default();
     // The mouse already reports screen coordinates.
@@ -186,36 +228,36 @@ fn main() {
             connected_net()
         }),
         mqtt: Mutex::new(None),
+        outbox: Mutex::new(Vec::new()),
         start: Instant::now(),
-        storage: Some(dir),
+        storage,
     });
 
     if args.demo {
         let env = shared.env();
-        let mut app = shared.app.lock().unwrap();
+        let mut app = shared.app.lock().unwrap_or_else(PoisonError::into_inner);
         if let Err(e) = demo(&mut app, &env) {
             eprintln!("demo data rejected: {e}");
         }
     }
     serve_http(Arc::clone(&shared), args.port);
-    fetch_weather(Arc::clone(&shared));
     run_mqtt(Arc::clone(&shared));
-    run_window(&shared, args.calibrate);
+    if args.headless {
+        run_headless(&shared);
+    } else {
+        run_window(&shared, args.calibrate);
+    }
 }
 
 /// The same requests a phone, Home Assistant or the Claude Code hook would
 /// send, so the views have something to show.
 fn demo(app: &mut App, env: &Env) -> Result<(), String> {
-    if !app.settings().has_location() {
-        post(
-            app,
-            env,
-            "/api/settings",
-            r#"{"location":"Berlin","latitude":52.52,"longitude":13.41}"#,
-        )?;
-    }
+    request(app, env, "PUT", "/api/weather", SAMPLE_WEATHER)?;
     for (id, body) in DEMO_ITEMS {
         request(app, env, "PUT", &format!("/api/items/{id}"), body)?;
+    }
+    for (name, screen) in DEMO_SCREENS {
+        request(app, env, "PUT", &format!("/api/screens/{name}"), screen)?;
     }
     Ok(())
 }
@@ -248,12 +290,13 @@ fn request(app: &mut App, env: &Env, method: &str, path: &str, body: &str) -> Re
             path,
             body: body.as_bytes(),
             token: None,
+            if_none_match: None,
         },
     );
     app.take_effects();
     (r.status == 200)
         .then_some(())
-        .ok_or_else(|| format!("{method} {path}: {}", r.body))
+        .ok_or_else(|| format!("{method} {path}: {}", r.text()))
 }
 
 fn post(app: &mut App, env: &Env, path: &str, body: &str) -> Result<(), String> {
@@ -282,11 +325,30 @@ fn to_raw(p: Point, fake_adc: bool) -> RawTouch {
     }
 }
 
+/// The app loop without a window: ticks and draws off-screen.
+fn run_headless(shared: &Shared) {
+    let mut display = SimulatorDisplay::<Rgb565>::new(Size::new(SCREEN_W as u32, SCREEN_H as u32));
+    loop {
+        let env = shared.env();
+        {
+            let mut app = shared.app.lock().unwrap_or_else(PoisonError::into_inner);
+            app.tick(&env, None);
+            shared.apply_effects(&mut app);
+            let Ok(()) = app.draw(&mut display, &env);
+        }
+        thread::sleep(TICK);
+    }
+}
+
+#[expect(
+    clippy::wildcard_enum_match_arm,
+    reason = "of the window events only the left mouse button and quitting matter"
+)]
 fn run_window(shared: &Shared, fake_adc: bool) {
     let size = Size::new(SCREEN_W as u32, SCREEN_H as u32);
     let mut display = SimulatorDisplay::<Rgb565>::new(size);
     let dark = SimulatorDisplay::<Rgb565>::new(size);
-    let mut window = Window::new("Deskbuddy simulator", &output_settings());
+    let mut window = Window::new("Herald simulator", &output_settings());
     let mut touch: Option<Point> = None;
     let mut led = Led::Off;
 
@@ -294,7 +356,7 @@ fn run_window(shared: &Shared, fake_adc: bool) {
         let frame_start = Instant::now();
         let env = shared.env();
         let asleep = {
-            let mut app = shared.app.lock().unwrap();
+            let mut app = shared.app.lock().unwrap_or_else(PoisonError::into_inner);
             let raw = touch.map(|p| to_raw(p, fake_adc));
             app.tick(&env, raw);
             shared.apply_effects(&mut app);
@@ -302,7 +364,7 @@ fn run_window(shared: &Shared, fake_adc: bool) {
             let now_led = app.led();
             if now_led != led {
                 led = now_led;
-                println!("[led] {led:?}");
+                say!("[led] {led:?}");
             }
             app.backlight() == 0
         };
@@ -354,12 +416,17 @@ fn serve_http(shared: Arc<Shared>, port: u16) {
                 .iter()
                 .find(|h| h.field.equiv(api::TOKEN_HEADER))
                 .map(|h| h.value.as_str().to_owned());
+            let if_none_match = request
+                .headers()
+                .iter()
+                .find(|h| h.field.equiv("If-None-Match"))
+                .map(|h| h.value.as_str().to_owned());
             let method = request.method().as_str().to_owned();
             let path = request.url().to_owned();
 
             let response = {
                 let env = shared.env();
-                let mut app = shared.app.lock().unwrap();
+                let mut app = shared.app.lock().unwrap_or_else(PoisonError::into_inner);
                 let response = api::handle(
                     &mut app,
                     &env,
@@ -368,40 +435,25 @@ fn serve_http(shared: Arc<Shared>, port: u16) {
                         path: &path,
                         body: &body,
                         token: token.as_deref(),
+                        if_none_match: if_none_match.as_deref(),
                     },
                 );
                 shared.apply_effects(&mut app);
+                drop(app);
                 response
             };
-            let header =
-                tiny_http::Header::from_bytes("Content-Type", response.content_type).unwrap();
-            let reply = tiny_http::Response::from_string(response.body)
-                .with_status_code(response.status)
-                .with_header(header);
+            let mut reply = tiny_http::Response::from_data(response.body.into_owned())
+                .with_status_code(response.status);
+            let headers = std::iter::once(("Content-Type", response.content_type.to_owned()))
+                .chain(response.headers);
+            for (name, value) in headers {
+                if let Ok(h) = tiny_http::Header::from_bytes(name, value) {
+                    reply.add_header(h);
+                }
+            }
             if let Err(e) = request.respond(reply) {
                 eprintln!("HTTP response failed: {e}");
             }
-        }
-    });
-}
-
-fn fetch_weather(shared: Arc<Shared>) {
-    thread::spawn(move || loop {
-        thread::sleep(Duration::from_secs(1));
-        let Some(url) = shared.app.lock().unwrap().weather_due(&shared.env()) else {
-            continue;
-        };
-        // The lock is not held during the request, as on the device.
-        let body = ureq::get(&url)
-            .call()
-            .and_then(|mut r| r.body_mut().read_to_string());
-        let result = match body {
-            Ok(body) => shared.app.lock().unwrap().set_weather(&body, &shared.env()),
-            Err(e) => Err(e.to_string()),
-        };
-        match result {
-            Ok(()) => println!("[weather] updated"),
-            Err(e) => eprintln!("[weather] {e}"),
         }
     });
 }
@@ -420,7 +472,7 @@ impl MqttConnection {
     fn open(shared: &Arc<Shared>, config: ui::mqtt::Config) -> Self {
         use rumqttc::{Event, LastWill, MqttOptions, Packet, QoS};
 
-        let mut options = MqttOptions::new("deskbuddy-sim", config.host.clone(), config.port);
+        let mut options = MqttOptions::new("herald-sim", config.host.clone(), config.port);
         options.set_keep_alive(Duration::from_secs(30));
         options.set_last_will(LastWill::new(
             config.status_topic(),
@@ -444,6 +496,7 @@ impl MqttConnection {
         let transport = config.transport();
         let topics = config.subscriptions();
         let status = config.status_topic();
+        let error_topic = config.error_topic();
         let url = config.url();
         thread::spawn(move || {
             for event in connection.iter() {
@@ -452,7 +505,7 @@ impl MqttConnection {
                 }
                 match event {
                     Ok(Event::Incoming(Packet::ConnAck(_))) => {
-                        println!("[mqtt] connected to {url}");
+                        say!("[mqtt] connected to {url}");
                         flag.store(true, Ordering::Relaxed);
                         for topic in &topics {
                             let _ = subscriber.try_subscribe(topic.as_str(), QoS::AtLeastOnce);
@@ -466,22 +519,32 @@ impl MqttConnection {
                     }
                     Ok(Event::Incoming(Packet::Publish(p))) => {
                         let env = shared.env();
-                        let mut app = shared.app.lock().unwrap();
+                        let mut app = shared.app.lock().unwrap_or_else(PoisonError::into_inner);
                         let message = ui::mqtt::Message {
                             topic: &p.topic,
                             payload: &p.payload,
                         };
                         let result = ui::command::handle(&transport, &mut app, &env, &message);
                         shared.apply_effects(&mut app);
+                        drop(app);
                         match result {
-                            Ok(_) => println!("[mqtt] {}", p.topic),
-                            Err(e) => eprintln!("[mqtt] {}: {}", p.topic, e.message),
+                            Ok(_) => say!("[mqtt] {}", p.topic),
+                            Err(e) => {
+                                warn!("[mqtt] {}: {}", p.topic, e.message);
+                                let report = ui::mqtt::error_payload(&message, &e);
+                                let _ = subscriber.try_publish(
+                                    error_topic.as_str(),
+                                    QoS::AtMostOnce,
+                                    false,
+                                    report,
+                                );
+                            }
                         }
                     }
                     Ok(_) => {}
                     Err(e) => {
                         if flag.swap(false, Ordering::Relaxed) {
-                            eprintln!("[mqtt] disconnected: {e}");
+                            warn!("[mqtt] disconnected: {e}");
                         }
                         // The next iteration reconnects.
                         thread::sleep(Duration::from_secs(2));
@@ -510,7 +573,13 @@ fn run_mqtt(shared: Arc<Shared>) {
         let mut current: Option<MqttConnection> = None;
         let mut publisher = ui::mqtt::StatePublisher::default();
         loop {
-            let wanted = ui::mqtt::Config::from_settings(shared.app.lock().unwrap().settings());
+            let wanted = ui::mqtt::Config::from_settings(
+                shared
+                    .app
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .settings(),
+            );
             if current.as_ref().map(|c| &c.config) != wanted.as_ref() {
                 if let Some(old) = current.take() {
                     old.close();
@@ -521,10 +590,26 @@ fn run_mqtt(shared: Arc<Shared>) {
             let connected = current
                 .as_ref()
                 .map(|c| c.connected.load(Ordering::Relaxed));
-            *shared.mqtt.lock().unwrap() = connected;
+            *shared.mqtt.lock().unwrap_or_else(PoisonError::into_inner) = connected;
             if let (Some(c), Some(true)) = (&current, connected) {
+                let qos = rumqttc::QoS::AtLeastOnce;
+                let outbox = std::mem::take(
+                    &mut *shared.outbox.lock().unwrap_or_else(PoisonError::into_inner),
+                );
+                for (name, payload) in outbox {
+                    let topic = c.config.screen_topic(&name);
+                    let _ = c
+                        .client
+                        .try_publish(topic, qos, true, payload.unwrap_or_default());
+                }
+                for line in ui::logbuf::take_pending() {
+                    let _ = c.client.try_publish(c.config.log_topic(), qos, false, line);
+                }
                 let env = shared.env();
-                let payload = publisher.due(&shared.app.lock().unwrap(), &env);
+                let payload = publisher.due(
+                    &shared.app.lock().unwrap_or_else(PoisonError::into_inner),
+                    &env,
+                );
                 if let Some(payload) = payload {
                     let _ = c.client.try_publish(
                         c.config.state_topic(),
@@ -543,12 +628,49 @@ fn run_mqtt(shared: Arc<Shared>) {
 
 // ------------------------------------------------------------ screenshots
 
-/// A real Open-Meteo response (Berlin, 2026-11-21), so screenshots do not
-/// depend on the network.
-const SAMPLE_WEATHER: &str = r#"{"current":{"temperature_2m":6.4,"weather_code":2,"is_day":1},"hourly":{"time":["2026-11-21T17:00","2026-11-21T18:00","2026-11-21T19:00","2026-11-21T20:00","2026-11-21T21:00","2026-11-21T22:00","2026-11-21T23:00","2026-11-22T00:00","2026-11-22T01:00","2026-11-22T02:00","2026-11-22T03:00","2026-11-22T04:00"],"temperature_2m":[6.4,6.2,5.9,5.7,5.5,5.3,5.2,4.9,4.8,4.8,4.7,4.5],"precipitation_probability":[23,40,35,18,13,10,20,33,45,45,28,13],"weather_code":[3,3,80,80,61,3,3,3,61,61,3,2],"is_day":[0,0,0,0,0,0,0,0,0,0,0,0]},"daily":{"time":["2026-11-21","2026-11-22","2026-11-23","2026-11-24"],"weather_code":[80,61,77,3],"temperature_2m_max":[6.7,4.9,3.0,1.7],"temperature_2m_min":[0.6,2.1,-0.6,-1.0],"sunrise":["2026-11-21T07:38","2026-11-22T07:39","2026-11-23T07:41","2026-11-24T07:43"],"sunset":["2026-11-21T16:05","2026-11-22T16:04","2026-11-23T16:03","2026-11-24T16:02"]}}"#;
+/// Custom screens as Home Assistant might send them, for the screenshots.
+const DEMO_SCREENS: [(&str, &str); 2] = [
+    (
+        "energy",
+        r#"{"title":"Energy","widgets":[
+            {"type":"value","label":"Solar now","value":3.2,"unit":"kW","color":"yellow"},
+            {"type":"gauge","label":"Battery","value":64,"unit":"%","zones":[{"to":20,"color":"red"},{"to":60,"color":"yellow"},{"to":100,"color":"green"}]},
+            {"type":"chart","label":"Today","values":[0,0,0.2,0.9,1.8,2.6,3.2,3.0,2.4,1.1,0.3],"unit":" kW","color":"yellow"},
+            {"type":"list","label":"Usage","rows":[{"label":"Heat pump","value":"1.4 kW"},{"label":"Car","value":"0 kW"},{"label":"House","value":"0.6 kW"}]},
+            {"type":"progress","label":"Car charged","value":82,"color":"green"},
+            {"type":"countdown","label":"Cheap power in","until":1795371000}
+        ]}"#,
+    ),
+    (
+        "house",
+        r##"{"title":"At home","widgets":[
+            {"type":"icon","icon":"window","label":"Kitchen","value":"open","color":"red"},
+            {"type":"icon","icon":"door","label":"Front door","value":"locked","color":"green"},
+            {"type":"grid","tiles":[{"label":"CO2","value":812,"unit":" ppm","color":"yellow"},{"label":"Living","value":21.5,"unit":"°"},{"label":"Bath","value":23.1,"unit":"°"},{"label":"Outside","value":4,"unit":"°","color":"#4A9BFF"}]},
+            {"type":"value","label":"Washing machine","value":"0:42","digits":true}
+        ]}"##,
+    ),
+];
+
+/// Weather as Home Assistant would push it (Berlin, 2026-11-21), for the
+/// demo data and the screenshots.
+const SAMPLE_WEATHER: &str = r#"{"temp":6.4,"condition":"cloudy","is_day":false,"sunrise":"07:38","sunset":"16:05","hourly":[{"hour":17,"temp":6.4,"rain":23,"condition":"cloudy","is_day":false},{"hour":18,"temp":6.2,"rain":40,"condition":"cloudy","is_day":false},{"hour":19,"temp":5.9,"rain":35,"condition":"rainy","is_day":false},{"hour":20,"temp":5.7,"rain":18,"condition":"rainy","is_day":false},{"hour":21,"temp":5.5,"rain":13,"condition":"rainy","is_day":false},{"hour":22,"temp":5.3,"rain":10,"condition":"cloudy","is_day":false},{"hour":23,"temp":5.2,"rain":20,"condition":"cloudy","is_day":false},{"hour":0,"temp":4.9,"rain":33,"condition":"cloudy","is_day":false},{"hour":1,"temp":4.8,"rain":45,"condition":"rainy","is_day":false},{"hour":2,"temp":4.8,"rain":45,"condition":"rainy","is_day":false},{"hour":3,"temp":4.7,"rain":28,"condition":"cloudy","is_day":false},{"hour":4,"temp":4.5,"rain":13,"condition":"partlycloudy","is_day":false}],"daily":[{"date":"2026-11-21","min":0.6,"max":6.7,"condition":"rainy"},{"date":"2026-11-22","min":2.1,"max":4.9,"condition":"rainy"},{"date":"2026-11-23","min":-0.6,"max":3.0,"condition":"snowy"},{"date":"2026-11-24","min":-1.0,"max":1.7,"condition":"cloudy"}]}"#;
+
+/// Lets animations settle, with an optional finger on the screen.
+fn run(app: &mut App, env: &mut Env, ms: u64, touch: Option<(i32, i32)>) {
+    for _ in 0..ms / 30 {
+        env.now_ms += 30;
+        app.tick(env, touch.map(|(x, y)| to_raw(Point::new(x, y), true)));
+    }
+    app.take_effects();
+}
 
 /// Renders every screen into PNG files without opening a window. The clock
 /// is fixed so the output is reproducible.
+#[expect(
+    clippy::too_many_lines,
+    reason = "one fixed sequence of shots, read top to bottom"
+)]
 fn screenshots(dir: &Path) -> Result<(), String> {
     fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     let mut display = SimulatorDisplay::<Rgb565>::new(Size::new(SCREEN_W as u32, SCREEN_H as u32));
@@ -565,6 +687,8 @@ fn screenshots(dir: &Path) -> Result<(), String> {
             second: 37,
         }),
         net: connected_net(),
+        // 2026-11-21 17:42:37 in Berlin.
+        unix_s: Some(1_795_365_757),
         ..Env::default()
     };
     let mut count = 0;
@@ -577,14 +701,6 @@ fn screenshots(dir: &Path) -> Result<(), String> {
             .save_png(&file)
             .map_err(|e| format!("{}: {e}", file.display()))
     };
-    // Lets animations settle, with an optional finger on the screen.
-    fn run(app: &mut App, env: &mut Env, ms: u64, touch: Option<(i32, i32)>) {
-        for _ in 0..ms / 30 {
-            env.now_ms += 30;
-            app.tick(env, touch.map(|(x, y)| to_raw(Point::new(x, y), true)));
-        }
-        app.take_effects();
-    }
     let view = |app: &mut App, env: &Env, name: &str| {
         post(app, env, "/api/view", &format!(r#"{{"view":"{name}"}}"#))
     };
@@ -599,7 +715,6 @@ fn screenshots(dir: &Path) -> Result<(), String> {
 
     shot(&mut app, &env, "home-empty")?;
     demo(&mut app, &env)?;
-    app.set_weather(SAMPLE_WEATHER, &env)?;
     shot(&mut app, &env, "home")?;
     for i in 0..4 {
         request(
@@ -619,23 +734,42 @@ fn screenshots(dir: &Path) -> Result<(), String> {
     view(&mut app, &env, "calendar")?;
     shot(&mut app, &env, "calendar")?;
 
+    for (name, screen) in DEMO_SCREENS {
+        request(
+            &mut app,
+            &env,
+            "PUT",
+            &format!("/api/screens/{name}"),
+            screen,
+        )?;
+        view(&mut app, &env, name)?;
+        shot(&mut app, &env, &format!("screen-{name}"))?;
+        request(
+            &mut app,
+            &env,
+            "DELETE",
+            &format!("/api/screens/{name}"),
+            "",
+        )?;
+    }
+
     view(&mut app, &env, "home")?;
-    for (code, is_day, name) in [
-        (0, 1, "clear-day"),
-        (0, 0, "clear-night"),
-        (3, 1, "cloudy"),
-        (45, 1, "fog"),
-        (63, 1, "rain"),
-        (73, 0, "snow"),
-        (95, 1, "thunder"),
+    for (condition, is_day, name) in [
+        ("sunny", true, "clear-day"),
+        ("clear-night", false, "clear-night"),
+        ("cloudy", true, "cloudy"),
+        ("fog", true, "fog"),
+        ("rainy", true, "rain"),
+        ("snowy", false, "snow"),
+        ("lightning", true, "thunder"),
     ] {
         let body = format!(
-            r#"{{"current":{{"temperature_2m":-3.4,"weather_code":{code},"is_day":{is_day}}},"daily":{{"temperature_2m_max":[4.2],"temperature_2m_min":[-6.8]}}}}"#
+            r#"{{"temp":-3.4,"condition":"{condition}","is_day":{is_day},"min":-6.8,"max":4.2}}"#
         );
-        app.set_weather(&body, &env)?;
+        request(&mut app, &env, "PUT", "/api/weather", &body)?;
         shot(&mut app, &env, &format!("weather-{name}"))?;
     }
-    app.set_weather(SAMPLE_WEATHER, &env)?;
+    request(&mut app, &env, "PUT", "/api/weather", SAMPLE_WEATHER)?;
 
     // Long press opens the menu.
     run(&mut app, &mut env, 900, Some((240, 160)));

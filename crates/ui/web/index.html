@@ -2,322 +2,771 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Deskbuddy</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link rel="icon" href="data:,">
+<title>Herald</title>
 <style>
-  :root { color-scheme: light dark; --bg:#f4f1ea; --card:#fff; --fg:#1b1d21; --dim:#6b7078; --line:#ddd8ce; --accent:#0a84c6; }
-  @media (prefers-color-scheme: dark) { :root { --bg:#111316; --card:#1c1f24; --fg:#f2f2f2; --dim:#8a8f98; --line:#2e333a; --accent:#35d0ff; } }
-  * { box-sizing: border-box; }
-  body { margin:0; padding:16px; background:var(--bg); color:var(--fg); font:16px/1.45 system-ui,sans-serif; }
-  main { max-width:560px; margin:0 auto; }
-  h1 { font-size:1.5rem; margin:.2em 0 .1em; }
-  h2 { font-size:1rem; margin:0 0 .8em; }
-  section { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:16px; margin:14px 0; }
-  label { display:block; font-size:.85rem; color:var(--dim); margin:.7em 0 .2em; }
-  input, select, button { font:inherit; color:inherit; }
-  input[type=text], input[type=password], input[type=number], select { width:100%; padding:.5em .6em; border:1px solid var(--line); border-radius:8px; background:var(--bg); }
-  input[type=range] { width:100%; }
-  input[type=color] { width:56px; height:36px; padding:0; border:1px solid var(--line); border-radius:8px; background:none; }
-  button { padding:.5em 1em; border:1px solid var(--line); border-radius:8px; background:var(--bg); cursor:pointer; }
-  button.primary { background:var(--accent); border-color:var(--accent); color:#000; font-weight:600; }
-  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
-  .row > * { flex:1 1 auto; }
-  .row > button { flex:0 0 auto; }
-  .dim { color:var(--dim); font-size:.85rem; }
-  #msg { min-height:1.4em; }
-  #msg.err { color:#d93a30; }
-  dl { display:grid; grid-template-columns:auto 1fr; gap:.2em 1em; margin:0; }
-  dt { color:var(--dim); } dd { margin:0; }
-  .items { list-style:none; margin:0 0 .6em; padding:0; }
-  .items li { display:flex; align-items:center; gap:.6em; padding:.35em 0; border-bottom:1px solid var(--line); }
-  .items li span.text { flex:1; }
-  .dot { width:.8em; height:.8em; border-radius:50%; flex:0 0 auto; }
-  .items button { padding:.2em .6em; }
-  label.check { display:inline-flex; gap:.3em; align-items:center; color:var(--fg); margin:0; }
+:root{color-scheme:light dark;--paper:#EEF1F4;--panel:#F7F9FB;--ink:#18202B;--muted:#5D6878;--rule:#D3DAE3;--bezel:#05070A;--accent:#0A84C6;--on-accent:#fff;--bad:#C8372D;--red:#FF5A4F;--yellow:#FFC42E;--blue:#4A9BFF;--green:#3DD68C;--grey:#8A8F98;--h:38px;--r:9px}
+@media (prefers-color-scheme:dark){:root{--paper:#13171D;--panel:#191E25;--ink:#E8ECF1;--muted:#8C96A3;--rule:#262D36;--bad:#FF6B5F}}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--paper);color:var(--ink);font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-text-size-adjust:100%}
+a{color:var(--accent)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+code,pre{font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+code{background:var(--panel);border:1px solid var(--rule);border-radius:5px;padding:0 .3em;overflow-wrap:break-word}
+pre{background:var(--panel);border:1px solid var(--rule);border-radius:var(--r);padding:12px 14px;overflow:auto;margin:.6em 0 1.2em}
+pre code{border:0;padding:0;background:none}
+h1,h2,h3{line-height:1.25;margin:0}
+h1{font-size:24px;font-weight:650;letter-spacing:-.01em}
+h2{font-size:18px;font-weight:620;margin:32px 0 4px}
+h3{font-size:15px;font-weight:620;margin:20px 0 4px}
+p{margin:.3em 0 .9em}
+.muted{color:var(--muted)}
+.small{font-size:13px}
+[hidden]{display:none!important}
+.shell{display:grid;grid-template-columns:200px minmax(0,1fr);min-height:100vh}
+.rail{position:sticky;top:0;height:100vh;padding:22px 14px;border-right:1px solid var(--rule);display:flex;flex-direction:column;gap:2px}
+.brand{display:flex;align-items:center;gap:10px;padding:0 10px 22px;font-weight:700;font-size:19px;letter-spacing:-.01em}
+.brand i{width:10px;height:10px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 4px color-mix(in srgb,var(--accent) 22%,transparent)}
+.rail a{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;color:var(--ink);text-decoration:none}
+.rail a svg{width:18px;height:18px;opacity:.75}
+.rail a:hover{background:var(--panel)}
+.rail a[aria-current=page]{background:var(--panel);font-weight:600;box-shadow:inset 3px 0 0 var(--accent)}
+.rail .foot{margin-top:auto;padding:10px;font-size:12px;color:var(--muted);overflow-wrap:anywhere}
+main{padding:28px 36px 120px;max-width:1000px;width:100%}
+.head{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:18px}
+.head .muted{font-size:14px}
+@media (max-width:760px){
+ .shell{grid-template-columns:1fr}
+ .rail{position:fixed;inset:auto 0 0 0;top:auto;height:auto;flex-direction:row;justify-content:space-around;padding:6px 4px calc(6px + env(safe-area-inset-bottom));border-right:0;border-top:1px solid var(--rule);background:var(--paper);z-index:20}
+ .brand,.rail .foot{display:none}
+ .rail a{flex-direction:column;gap:2px;font-size:11px;padding:6px 2px;flex:1;text-align:center}
+ .rail a[aria-current=page]{box-shadow:inset 0 3px 0 var(--accent)}
+ main{padding:20px 16px 140px}
+}
+.mirror-wrap{display:grid;grid-template-columns:minmax(0,1fr) 250px;gap:24px;align-items:start}
+@media (max-width:980px){.mirror-wrap{grid-template-columns:1fr}}
+.bezel{background:var(--bezel);border-radius:18px;padding:14px;box-shadow:0 18px 40px -24px rgba(0,0,0,.55)}
+.screen{position:relative;aspect-ratio:3/2;overflow:hidden;border-radius:4px;cursor:pointer;touch-action:pan-y;user-select:none;-webkit-user-select:none}
+.dev{position:absolute;left:0;top:0;width:480px;height:320px;transform-origin:0 0;font-family:"Helvetica Neue",Helvetica,Arial,sans-serif;overflow:hidden}
+.dev>*{position:absolute}
+.sleep{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.7);color:#cfd4da;font-size:14px;pointer-events:none}
+.mirror-hint{font-size:13px;color:var(--muted);margin-top:10px}
+.controls{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px;align-items:center}
+.facts{margin:0;display:grid;grid-template-columns:auto 1fr;gap:8px 14px;font-size:14px}
+.facts dt{color:var(--muted)}
+.facts dd{margin:0;overflow-wrap:anywhere}
+.dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px;vertical-align:1px;background:var(--grey)}
+.dot.ok{background:var(--green)}.dot.warn{background:var(--yellow)}.dot.bad{background:var(--red)}
+.form{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:14px 18px;margin:12px 0 8px}
+.field{display:flex;flex-direction:column;gap:5px;min-width:0}
+.field.wide{grid-column:1/-1}
+.field>label,.field>.lbl{font-size:13px;color:var(--muted)}
+.err{color:var(--bad);font-size:13px}
+.field.has-err input,.field.has-err select{border-color:var(--bad)}
+input,select,textarea,button{font:inherit;color:inherit}
+input[type=text],input[type=password],input[type=number],input[type=time],input[type=datetime-local],select,textarea{width:100%;min-height:var(--h);padding:7px 11px;border:1px solid var(--rule);border-radius:var(--r);background:var(--panel);outline:none}
+textarea{min-height:90px;resize:vertical;font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace}
+input:focus,select:focus,textarea:focus{border-color:var(--accent)}
+input[type=number]{-moz-appearance:textfield;appearance:textfield}
+input[type=number]::-webkit-inner-spin-button,input[type=number]::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}
+select{-webkit-appearance:none;appearance:none;padding-right:30px;background-image:linear-gradient(45deg,transparent 50%,var(--muted) 50%),linear-gradient(135deg,var(--muted) 50%,transparent 50%);background-position:calc(100% - 15px) 52%,calc(100% - 10px) 52%;background-size:5px 5px;background-repeat:no-repeat}
+input[type=color]{width:100%;height:var(--h);padding:3px;border:1px solid var(--rule);border-radius:var(--r);background:var(--panel)}
+input[type=range]{width:100%;accent-color:var(--accent);height:var(--h);margin:0}
+.check{display:flex;align-items:center;gap:9px;cursor:pointer;min-height:var(--h)}
+.check input{width:18px;height:18px;accent-color:var(--accent);margin:0}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{display:inline-flex;align-items:center;gap:7px;padding:5px 11px;border:1px solid var(--rule);border-radius:999px;background:var(--panel);font-size:14px;cursor:pointer}
+.chip input{margin:0;accent-color:var(--accent)}
+button,.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:var(--h);padding:0 14px;border:1px solid var(--rule);border-radius:var(--r);background:var(--panel);cursor:pointer;text-decoration:none;color:var(--ink);white-space:nowrap}
+button:hover,.btn:hover{border-color:var(--muted)}
+button.primary{background:var(--accent);border-color:var(--accent);color:var(--on-accent);font-weight:600}
+button.danger{color:var(--bad)}
+button.icon{width:var(--h);padding:0}
+button[aria-pressed=true]{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+button:disabled{opacity:.5;cursor:default}
+.seg{display:inline-flex;border:1px solid var(--rule);border-radius:var(--r);overflow:hidden;flex-wrap:wrap}
+.seg button{border:0;border-radius:0;border-right:1px solid var(--rule);min-height:calc(var(--h) - 2px)}
+.seg button:last-child{border-right:0}
+.rule{border:0;border-top:1px solid var(--rule);margin:28px 0 0}
+.savebar{position:sticky;bottom:16px;margin-top:24px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 12px 10px 16px;border:1px solid var(--rule);border-radius:12px;background:var(--panel);box-shadow:0 12px 30px -18px rgba(0,0,0,.5);z-index:10}
+.savebar .msg{flex:1;min-width:160px;font-size:14px}
+.savebar .msg.err{color:var(--bad)}
+@media (max-width:760px){.savebar{bottom:76px}}
+.list{list-style:none;margin:8px 0 0;padding:0;border-top:1px solid var(--rule)}
+.list li{display:flex;align-items:center;gap:12px;padding:10px 2px;border-bottom:1px solid var(--rule)}
+.list .grow{flex:1;min-width:0}
+.list .t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.list .sub{font-size:13px;color:var(--muted)}
+.list .empty{color:var(--muted)}
+.sw{width:12px;height:12px;border-radius:50%;flex:0 0 auto}
+.ic{width:18px;height:18px;flex:0 0 auto;display:inline-flex}
+table{border-collapse:collapse;width:100%;font-size:14px;margin:8px 0 16px}
+th,td{text-align:left;vertical-align:top;padding:7px 8px;border-bottom:1px solid var(--rule)}
+th{color:var(--muted);font-weight:500}
+td:first-child{white-space:nowrap}
+.tbl{overflow-x:auto}
+.builder{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:24px;align-items:start;margin-top:12px}
+@media (max-width:980px){.builder{grid-template-columns:1fr}}
+.builder .preview{position:sticky;top:20px}
+@media (max-width:980px){.builder .preview{position:static;order:-1}}
+.wg{border:1px solid var(--rule);border-radius:var(--r);padding:12px;margin:10px 0;background:var(--panel)}
+.wg .wh{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.wg .wh strong{flex:1}
+.wg .form{margin:0;grid-template-columns:repeat(auto-fill,minmax(150px,1fr))}
+.wg input[type=text],.wg input[type=number],.wg input[type=datetime-local],.wg select,.wg textarea{background:var(--paper)}
+.drop{border:1.5px dashed var(--rule);border-radius:12px;padding:22px;text-align:center;color:var(--muted)}
+.drop.over{border-color:var(--accent);color:var(--ink)}
+progress{width:100%;height:8px;accent-color:var(--accent)}
+.log{max-height:420px;white-space:pre-wrap;word-break:break-word}
+dialog{border:1px solid var(--rule);border-radius:14px;background:var(--paper);color:var(--ink);padding:22px;max-width:380px;width:calc(100% - 32px)}
+dialog::backdrop{background:rgba(0,0,0,.45)}
+.setup{max-width:420px;margin:12vh auto;padding:0 20px}
+.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--ink);color:var(--paper);padding:9px 16px;border-radius:10px;font-size:14px;z-index:50;max-width:calc(100% - 32px)}
+@media (max-width:760px){.toast{bottom:84px}}
+@media (prefers-reduced-motion:no-preference){.toast{animation:pop .18s ease-out}@keyframes pop{from{opacity:0;transform:translate(-50%,6px)}}}
 </style>
 </head>
 <body>
-<main>
-  <h1>Deskbuddy</h1>
-  <p id="msg" class="dim" role="status"></p>
+<div class="shell" id="shell">
+  <nav class="rail" aria-label="Sections">
+    <div class="brand"><i></i>Herald</div>
+    <a href="#overview" data-nav="overview"></a>
+    <a href="#feed" data-nav="feed"></a>
+    <a href="#screens" data-nav="screens"></a>
+    <a href="#display" data-nav="display"></a>
+    <a href="#connections" data-nav="connections"></a>
+    <a href="#system" data-nav="system"></a>
+    <div class="foot" id="foot"></div>
+  </nav>
+  <main>
 
-  <section>
-    <h2>Now</h2>
-    <dl id="state"></dl>
+  <section data-page="overview">
+    <div class="head"><h1 id="o-host">Herald</h1><span class="muted" id="o-sub"></span></div>
+    <div class="mirror-wrap">
+      <div>
+        <div class="bezel"><div class="screen" id="screen" role="button" tabindex="0" aria-label="Device screen: click to tap, drag sideways to swipe"><div class="dev" id="dev"></div><div class="sleep" id="sleep" hidden>Display is off</div></div></div>
+        <div class="controls">
+          <button class="icon" id="prev" aria-label="Previous view">&#8592;</button>
+          <div class="seg" id="viewbar" role="group" aria-label="Views"></div>
+          <button class="icon" id="next" aria-label="Next view">&#8594;</button>
+          <button id="power" aria-pressed="false">Display on</button>
+        </div>
+        <p class="mirror-hint">Drawn by this page from the device's state. Click it to tap the real screen, drag sideways to swipe, hold to open the device menu.</p>
+      </div>
+      <div>
+        <div class="field"><label for="o-bright">Brightness <span id="o-bright-v"></span></label><input type="range" id="o-bright" min="5" max="100" step="5"></div>
+        <dl class="facts" id="facts" style="margin-top:18px"></dl>
+      </div>
+    </div>
   </section>
 
-  <section id="token-box" hidden>
-    <h2>Access token</h2>
-    <p class="dim">This device asks for a token before it accepts changes.</p>
-    <div class="row"><input type="password" id="my-token" autocomplete="off"><button id="use-token">Use</button></div>
+  <section data-page="feed" hidden>
+    <div class="head"><h1>Feed</h1><span class="muted" id="f-count"></span></div>
+    <p class="muted">Items come from other systems, mostly over MQTT on <code id="f-topic"></code>. Red and yellow items are listed first and light the LED.</p>
+    <ul class="list" id="f-list"></ul>
+    <div class="controls"><button class="danger" id="f-clear">Remove all items</button></div>
   </section>
 
-  <section>
-    <h2>Feed</h2>
-    <p class="dim">Items shown on the home view. Other machines add them with <code>PUT /api/items/&lt;id&gt;</code>.</p>
-    <ul id="items" class="items"></ul>
-    <div class="row">
-      <div><label for="it-id">Id</label><input type="text" id="it-id" maxlength="32" placeholder="window.kitchen"></div>
-      <div><label for="it-color">Colour</label>
-        <select id="it-color"><option>red</option><option>yellow</option><option selected>blue</option><option>green</option><option>grey</option></select></div>
+  <section data-page="screens" hidden>
+    <div class="head"><h1>Screens</h1><span class="muted">Your own views, built from widgets</span></div>
+    <p class="muted">A screen is a retained MQTT message on <code id="s-topic"></code>. Publishing here sends it through the device to the broker, so it comes back after a restart. Home Assistant can update the values by publishing the same JSON.</p>
+    <ul class="list" id="s-list"></ul>
+    <div class="controls"><button class="primary" id="s-new">New screen</button></div>
+    <div id="editor" hidden>
+      <hr class="rule">
+      <h2 id="e-head">New screen</h2>
+      <div class="builder">
+        <div>
+          <div class="form">
+            <div class="field"><label for="e-name">Name</label><input type="text" id="e-name" maxlength="24" spellcheck="false" placeholder="energy"><span class="err" id="e-name-err"></span></div>
+            <div class="field"><label for="e-title">Title (optional)</label><input type="text" id="e-title" maxlength="32" placeholder="Energy"></div>
+            <div class="field"><label for="e-life">Disappears after (s, optional)</label><input type="number" id="e-life" min="1" placeholder="never"></div>
+          </div>
+          <div id="e-widgets"></div>
+          <div class="controls">
+            <select id="e-add-type" aria-label="Widget type" style="width:auto"></select>
+            <button id="e-add">Add widget</button>
+          </div>
+          <h3>JSON</h3>
+          <p class="muted small">Edit directly, or copy it into a Home Assistant automation.</p>
+          <textarea id="e-json" rows="8" spellcheck="false"></textarea>
+          <div class="controls"><button id="e-json-apply">Apply JSON</button><button id="e-copy">Copy JSON</button></div>
+          <div class="savebar"><span class="msg" id="e-msg">Not published yet</span><button id="e-cancel">Close</button><button class="primary" id="e-publish">Publish</button></div>
+        </div>
+        <div class="preview"><div class="bezel"><div class="screen" style="cursor:default"><div class="dev" id="e-dev"></div></div></div><p class="mirror-hint">Preview, drawn here in the browser.</p></div>
+      </div>
     </div>
-    <label for="it-text">Text (up to 32 characters)</label>
-    <input type="text" id="it-text" maxlength="32">
-    <div class="row">
-      <div><label for="it-detail">Right side (optional, else the age)</label><input type="text" id="it-detail" maxlength="12"></div>
-      <div><label for="it-ttl">Remove after seconds (empty = never)</label><input type="number" id="it-ttl" min="1" max="604800"></div>
-    </div>
-    <p class="row"><button class="primary" id="it-send">Add / update</button><button id="it-clear">Remove all</button></p>
   </section>
 
-  <section>
-    <h2>Settings</h2>
-    <div class="row">
-      <div><label for="s-theme">Display theme</label><select id="s-theme"><option>dark</option><option>light</option></select></div>
-      <div><label for="s-accent">Accent colour</label><input type="color" id="s-accent"></div>
+  <section data-page="display" hidden data-form>
+    <div class="head"><h1>Display</h1></div>
+    <h2>Look</h2>
+    <div class="form">
+      <div class="field"><label for="d-theme">Theme</label><select id="d-theme" data-key="theme"><option value="dark">Dark</option><option value="light">Light</option></select></div>
+      <div class="field"><label for="d-accent">Accent colour</label><input type="color" id="d-accent" data-key="accent_color" data-type="color"></div>
+      <div class="field"><label for="d-bright">Brightness <span data-out="d-bright"></span></label><input type="range" id="d-bright" data-key="brightness" data-type="int" min="5" max="100" step="5"></div>
+      <div class="field"><label for="d-sleep">Turn off after (s without touch, 0 = never)</label><input type="number" id="d-sleep" data-key="sleep_secs" data-type="int" min="0" max="86400"></div>
     </div>
-    <label for="s-brightness">Brightness <span id="s-brightness-out"></span></label>
-    <input type="range" id="s-brightness" min="5" max="100" step="5">
-    <label for="s-sleep">Sleep after (seconds without touch, 0 = never)</label>
-    <input type="number" id="s-sleep" min="0" max="86400">
-    <label><input type="checkbox" id="s-rotate"> Rotate through views on its own</label>
-    <div class="row">
-      <div><label for="s-rotate-secs">Seconds per view</label><input type="number" id="s-rotate-secs" min="5" max="3600"></div>
-      <div><label for="s-rotate-from">From</label><input type="time" id="s-rotate-from"></div>
-      <div><label for="s-rotate-until">Until</label><input type="time" id="s-rotate-until"></div>
+    <h2>Rotation</h2>
+    <p class="muted">Steps through the chosen views on its own. It waits a minute after a touch. The same time in both fields means all day.</p>
+    <label class="check"><input type="checkbox" id="d-rotate" data-key="rotate" data-type="bool"> Rotate views</label>
+    <div class="form">
+      <div class="field"><label for="d-rsecs">Seconds per view</label><input type="number" id="d-rsecs" data-key="rotate_secs" data-type="int" min="5" max="3600"></div>
+      <div class="field"><label for="d-rfrom">From</label><input type="time" id="d-rfrom" data-key="rotate_from"></div>
+      <div class="field"><label for="d-runtil">Until</label><input type="time" id="d-runtil" data-key="rotate_until"></div>
+      <div class="field wide"><span class="lbl">Views</span><div class="chips" id="d-rviews" data-key="rotate_views" data-type="views"></div></div>
     </div>
-    <p class="dim">Same time in both fields: all day. Rotation waits a minute after you touch the screen.</p>
-    <div class="row" id="s-rotate-views"></div>
-    <label for="s-tz">Time zone</label>
-    <select id="s-tz"></select>
-    <input type="text" id="s-tz-custom" placeholder="POSIX TZ string" hidden>
-    <label for="s-city">Weather location</label>
-    <div class="row"><input type="text" id="s-city" placeholder="City"><button id="s-find">Find</button></div>
-    <p class="dim" id="s-place"></p>
-    <label for="s-token">Access token (optional, required for changes once set)</label>
-    <input type="text" id="s-token" maxlength="64" autocomplete="off">
-    <h2 style="margin-top:1.2em">MQTT</h2>
-    <p class="dim">Feed items, view and settings can also come in over MQTT, e.g. from Home Assistant. Leave the broker empty to switch MQTT off.</p>
-    <div class="row">
-      <div><label for="s-mqtt-host">Broker</label><input type="text" id="s-mqtt-host" maxlength="64" placeholder="192.168.1.10"></div>
-      <div><label for="s-mqtt-port">Port</label><input type="number" id="s-mqtt-port" min="1" max="65535"></div>
+    <h2>Night</h2>
+    <p class="muted">Dims or turns off the screen between two times. A touch, or an item sent with <code>wake</code>, lights it up for the usual time.</p>
+    <label class="check"><input type="checkbox" id="d-night" data-key="night" data-type="bool"> Use night mode</label>
+    <div class="form">
+      <div class="field"><label for="d-nfrom">From</label><input type="time" id="d-nfrom" data-key="night_from"></div>
+      <div class="field"><label for="d-nuntil">Until</label><input type="time" id="d-nuntil" data-key="night_until"></div>
+      <div class="field"><label for="d-nbright">Brightness at night <span data-out="d-nbright"></span></label><input type="range" id="d-nbright" data-key="night_brightness" data-type="int" min="0" max="100" step="5"></div>
     </div>
-    <div class="row">
-      <div><label for="s-mqtt-user">User</label><input type="text" id="s-mqtt-user" maxlength="64" autocomplete="off"></div>
-      <div><label for="s-mqtt-pass">Password</label><input type="password" id="s-mqtt-pass" maxlength="64" autocomplete="off"></div>
-    </div>
-    <label for="s-mqtt-prefix">Topic prefix</label>
-    <input type="text" id="s-mqtt-prefix" maxlength="32">
-    <p class="dim" id="s-mqtt-topics"></p>
-    <p><button class="primary" id="s-save">Save settings</button></p>
   </section>
 
-  <section>
+  <section data-page="connections" hidden data-form>
+    <div class="head"><h1>Connections</h1></div>
+    <h2>Network and time</h2>
+    <div class="form">
+      <div class="field"><label for="c-host">Host name</label><input type="text" id="c-host" data-key="hostname" maxlength="30" spellcheck="false"></div>
+      <div class="field"><label for="c-tz">Time zone</label><select id="c-tz" data-key="timezone" data-type="tz"></select></div>
+      <div class="field" id="c-tzc-f" hidden><label for="c-tzc">POSIX TZ string</label><input type="text" id="c-tzc" maxlength="64" spellcheck="false"></div>
+      <div class="field"><label for="c-ntp">Time server</label><input type="text" id="c-ntp" data-key="ntp_server" maxlength="64" spellcheck="false"></div>
+    </div>
+    <p class="muted small">The host name goes to your router over DHCP, so local DNS can resolve it; mDNS also answers <code id="c-mdns"></code>.</p>
+    <h2>MQTT</h2>
+    <p class="muted">Items, weather, screens and settings arrive over MQTT. Leave the broker empty to switch it off.</p>
+    <div class="form">
+      <div class="field"><label for="c-mhost">Broker</label><input type="text" id="c-mhost" data-key="mqtt_host" maxlength="64" spellcheck="false" placeholder="192.168.1.10"></div>
+      <div class="field"><label for="c-mport">Port</label><input type="number" id="c-mport" data-key="mqtt_port" data-type="int" min="1" max="65535"></div>
+      <div class="field"><label for="c-muser">User</label><input type="text" id="c-muser" data-key="mqtt_user" maxlength="64" autocomplete="off"></div>
+      <div class="field"><label for="c-mpass">Password</label><input type="password" id="c-mpass" data-key="mqtt_password" maxlength="64" autocomplete="off"></div>
+      <div class="field"><label for="c-mprefix">Topic prefix</label><input type="text" id="c-mprefix" data-key="mqtt_prefix" maxlength="32" spellcheck="false"></div>
+    </div>
     <h2>WiFi</h2>
-    <p class="dim">The device reconnects after saving. Only 2.4 GHz networks work.</p>
-    <label for="w-ssid">Network name</label><input type="text" id="w-ssid" maxlength="32" autocomplete="off">
-    <label for="w-pass">Password</label><input type="password" id="w-pass" maxlength="63" autocomplete="off">
-    <p><button id="w-save">Save WiFi</button></p>
+    <p class="muted">Saving restarts the device on the new network. Only 2.4 GHz networks work.</p>
+    <div class="form">
+      <div class="field"><label for="w-ssid">Network name</label><input type="text" id="w-ssid" maxlength="32" autocomplete="off"></div>
+      <div class="field"><label for="w-pass">Password</label><input type="password" id="w-pass" maxlength="63" autocomplete="off"></div>
+    </div>
+    <button id="w-save">Save WiFi and restart</button>
+    <hr class="rule">
+    <h2>Topic reference</h2>
+    <div id="ref"></div>
   </section>
-</main>
+
+  <section data-page="system" hidden data-form>
+    <div class="head"><h1>System</h1></div>
+    <dl class="facts" id="sys-facts"></dl>
+    <h2>Update firmware</h2>
+    <p class="muted">Choose <code>herald-firmware.bin</code>. The device writes it to its spare slot and restarts into it. If the new firmware fails to connect, it goes back to the old one.</p>
+    <div class="drop" id="drop">Drop the .bin here or <label style="color:var(--accent);cursor:pointer;text-decoration:underline">choose a file<input type="file" id="ota-file" accept=".bin" hidden></label></div>
+    <div id="ota-progress" hidden style="margin-top:10px"><progress id="ota-bar" max="100" value="0"></progress><p class="small muted" id="ota-msg"></p></div>
+    <h2>Access token</h2>
+    <p class="muted">Changes over HTTP then need the header <code>X-Herald-Token</code>. Plain HTTP, so it guards against accidents, not attackers.</p>
+    <div class="form"><div class="field"><label for="y-token">Token</label><input type="text" id="y-token" data-key="token" maxlength="64" autocomplete="off" spellcheck="false" placeholder="none"></div></div>
+    <h2>Settings backup</h2>
+    <div class="controls"><button id="b-down">Download settings</button><label class="btn">Restore from file<input type="file" id="b-up" accept=".json,application/json" hidden></label><button class="danger" id="restart">Restart device</button></div>
+    <h2>Log</h2>
+    <p class="muted">The device's latest log lines, newest at the bottom.</p>
+    <pre class="log" id="log">Loading…</pre>
+  </section>
+
+  <div class="savebar" id="savebar" hidden><span class="msg" id="save-msg"></span><button id="discard">Discard</button><button class="primary" id="save">Save</button></div>
+  </main>
+</div>
+
+<div class="setup" id="setup" hidden>
+  <div class="brand" style="padding:0 0 18px"><i></i>Herald</div>
+  <h1>Connect to your WiFi</h1>
+  <p class="muted">Herald needs a 2.4 GHz network. After saving it restarts and joins it; then open it by its host name or the address shown on the screen.</p>
+  <div class="form" style="grid-template-columns:1fr">
+    <div class="field"><label for="su-ssid">Network name</label><input type="text" id="su-ssid" maxlength="32" autocomplete="off"></div>
+    <div class="field"><label for="su-pass">Password</label><input type="password" id="su-pass" maxlength="63" autocomplete="off"><span class="err" id="su-err"></span></div>
+  </div>
+  <button class="primary" id="su-save" style="width:100%">Connect</button>
+</div>
+
+<dialog id="tokdlg">
+  <h2 style="margin:0 0 6px">Token needed</h2>
+  <p class="muted">This device only accepts changes with its access token.</p>
+  <div class="field"><label for="tok">Token</label><input type="password" id="tok" autocomplete="off"></div>
+  <div class="controls" style="justify-content:flex-end"><button id="tok-cancel">Cancel</button><button class="primary" id="tok-ok">Use token</button></div>
+</dialog>
+
 <script>
-const $ = id => document.getElementById(id);
-const ZONES = {
-  "Europe/Berlin": "CET-1CEST,M3.5.0,M10.5.0/3",
-  "Europe/London": "GMT0BST,M3.5.0/1,M10.5.0",
-  "Europe/Helsinki": "EET-2EEST,M3.5.0/3,M10.5.0/4",
-  "UTC": "UTC0",
-  "America/New_York": "EST5EDT,M3.2.0,M11.1.0",
-  "America/Chicago": "CST6CDT,M3.2.0,M11.1.0",
-  "America/Denver": "MST7MDT,M3.2.0,M11.1.0",
-  "America/Los_Angeles": "PST8PDT,M3.2.0,M11.1.0",
-  "America/Sao_Paulo": "<-03>3",
-  "Asia/Dubai": "<+04>-4",
-  "Asia/Kolkata": "IST-5:30",
-  "Asia/Shanghai": "CST-8",
-  "Asia/Tokyo": "JST-9",
-  "Australia/Sydney": "AEST-10AEDT,M10.1.0,M4.1.0/3",
-  "Pacific/Auckland": "NZST-12NZDT,M9.5.0,M4.1.0/3"
+"use strict";
+const $=id=>document.getElementById(id);
+const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[c]);
+const COLORS={red:"#FF5A4F",yellow:"#FFC42E",blue:"#4A9BFF",green:"#3DD68C",grey:"#8A8F98",white:"#FFFFFF"};
+const ZONES={"Europe/Berlin":"CET-1CEST,M3.5.0,M10.5.0/3","Europe/London":"GMT0BST,M3.5.0/1,M10.5.0","Europe/Helsinki":"EET-2EEST,M3.5.0/3,M10.5.0/4","UTC":"UTC0","America/New_York":"EST5EDT,M3.2.0,M11.1.0","America/Chicago":"CST6CDT,M3.2.0,M11.1.0","America/Denver":"MST7MDT,M3.2.0,M11.1.0","America/Los_Angeles":"PST8PDT,M3.2.0,M11.1.0","America/Sao_Paulo":"<-03>3","Asia/Dubai":"<+04>-4","Asia/Kolkata":"IST-5:30","Asia/Shanghai":"CST-8","Asia/Tokyo":"JST-9","Australia/Sydney":"AEST-10AEDT,M10.1.0,M4.1.0/3","Pacific/Auckland":"NZST-12NZDT,M9.5.0,M4.1.0/3"};
+const DAYS=["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
+const MONTHS=["January","February","March","April","May","June","July","August","September","October","November","December"];
+const PAGES=[["overview","Overview",'<rect x="3" y="5" width="18" height="12" rx="2"/><path d="M8 21h8"/>'],["feed","Feed",'<path d="M4 6h16M4 12h16M4 18h10"/>'],["screens","Screens",'<rect x="3" y="3" width="8" height="8" rx="1.5"/><rect x="13" y="3" width="8" height="8" rx="1.5"/><rect x="3" y="13" width="8" height="8" rx="1.5"/><rect x="13" y="13" width="8" height="8" rx="1.5"/>'],["display","Display",'<circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2"/>'],["connections","Connections",'<path d="M2 9a15 15 0 0 1 20 0M5 13a10 10 0 0 1 14 0M8.5 16.5a5 5 0 0 1 7 0"/><circle cx="12" cy="20" r="1"/>'],["system","System",'<path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="2.5"/><circle cx="15" cy="17" r="2.5"/>']];
+
+// Icons, shared by feed rows, screens and the mirror.
+const IC={
+window:'<rect x="4" y="3" width="16" height="18" rx="1"/><path d="M12 3v18M4 12h16"/>',
+door:'<rect x="6" y="3" width="12" height="18" rx="1"/><circle cx="15" cy="12" r="1"/>',
+temperature:'<path d="M10 14V5a2 2 0 0 1 4 0v9"/><circle cx="12" cy="17" r="3"/>',
+humidity:'<path d="M12 3s6 7 6 11a6 6 0 0 1-12 0c0-4 6-11 6-11z"/>',
+power:'<path d="M13 2 5 14h6l-1 8 8-12h-6z"/>',
+sun:'<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5 19 19M5 19l1.5-1.5M17.5 6.5 19 5"/>',
+moon:'<path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/>',
+battery:'<rect x="3" y="7" width="16" height="10" rx="2"/><path d="M21 10v4M6 10v4M9 10v4"/>',
+mail:'<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/>',
+check:'<path d="m5 12 5 5 9-10"/>',
+warning:'<path d="M12 3 22 20H2z"/><path d="M12 10v4M12 17h.01"/>',
+info:'<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/>',
+home:'<path d="M3 11 12 3l9 8v10H3z"/><path d="M10 21v-6h4v6"/>',
+car:'<path d="M3 13l2-6h14l2 6v5H3z"/><circle cx="7.5" cy="16" r="1.3"/><circle cx="16.5" cy="16" r="1.3"/>',
+music:'<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>',
+clock:'<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+bell:'<path d="M6 16v-5a6 6 0 0 1 12 0v5l2 2H4z"/><path d="M10 21a2 2 0 0 0 4 0"/>',
+water:'<path d="M3 9c3-2 6 2 9 0s6-2 9 0M3 14c3-2 6 2 9 0s6-2 9 0M3 19c3-2 6 2 9 0s6-2 9 0"/>',
+wind:'<path d="M3 9h12a3 3 0 1 0-3-3M3 15h16a3 3 0 1 1-3 3"/>'};
+const CLOUD='<path d="M7 18h10a4 4 0 0 0 .5-8 5.5 5.5 0 0 0-10.6-1.2A4.6 4.6 0 0 0 7 18z"/>';
+function wxPaths(c,day){
+  const sky=day?IC.sun:IC.moon,up='<g transform="translate(0 -3)">'+CLOUD+'</g>';
+  switch(c){
+    case"clear":return sky;
+    case"partlycloudy":return '<g transform="translate(-3 -3) scale(.7)">'+sky+'</g><g transform="translate(3 3) scale(.85)">'+CLOUD+'</g>';
+    case"fog":return up+'<path d="M4 20h16M7 23h10"/>';
+    case"drizzle":return up+'<path d="M9 19v1M15 19v1M12 21v1"/>';
+    case"rain":return up+'<path d="m8 19-1 3M12 19l-1 3M16 19l-1 3"/>';
+    case"snow":return up+'<path d="M8 20h.01M12 22h.01M16 20h.01"/>';
+    case"thunder":return up+'<path d="m12 15-2 4h3l-2 4"/>';
+    default:return CLOUD;
+  }
+}
+const svg=(paths,size,color,sw)=>`<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="${color||"currentColor"}" stroke-width="${sw||2}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths}</svg>`;
+const LABEL={clear:"Clear",partlycloudy:"Partly cloudy",cloudy:"Cloudy",fog:"Fog",drizzle:"Drizzle",rain:"Rain",snow:"Snow",thunder:"Thunderstorm"};
+
+// Data and requests
+let token="";try{token=localStorage.getItem("herald-token")||""}catch(e){}
+let S=null,etag="",settings=null,screens={},screensRev=null,page="overview",tokenWait=null;
+function hdr(json){const h={};if(token)h["X-Herald-Token"]=token;if(json)h["Content-Type"]="application/json";return h}
+async function api(method,path,body){
+  for(;;){
+    const opt={method,headers:hdr(body!==undefined)};
+    if(body!==undefined)opt.body=JSON.stringify(body);
+    const r=await fetch(path,opt);
+    if(r.status===401){await askToken();continue}
+    const t=await r.text();let d;try{d=t?JSON.parse(t):{}}catch(e){d=t}
+    if(!r.ok)throw new Error((d&&d.error)||("HTTP "+r.status));
+    return d;
+  }
+}
+function askToken(){if(!tokenWait){tokenWait=new Promise(res=>{const dl=$("tokdlg");$("tok").value="";dl.showModal();const done=()=>{dl.close();tokenWait=null;res()};$("tok-ok").onclick=()=>{token=$("tok").value.trim();try{localStorage.setItem("herald-token",token)}catch(e){}done()};$("tok-cancel").onclick=done})}return tokenWait}
+let toastT;function toast(m){let t=document.querySelector(".toast");if(!t){t=document.createElement("div");t.className="toast";t.setAttribute("role","status");document.body.append(t)}t.textContent=m;clearTimeout(toastT);toastT=setTimeout(()=>t.remove(),2600)}
+
+let polling=false;
+async function poll(){
+  if(document.hidden||polling)return;polling=true;
+  try{
+    const r=await fetch("/api/state",{headers:etag?{"If-None-Match":etag}:{}});
+    if(r.status===304)return;
+    if(!r.ok)throw new Error("HTTP "+r.status);
+    etag=r.headers.get("ETag")||"";
+    S=await r.json();
+    if(S.screens_rev!==screensRev){screensRev=S.screens_rev;loadScreens()}
+    schedule();
+  }catch(e){setFoot("Device not reachable",true)}
+  finally{polling=false}
+}
+async function loadScreens(){try{screens=await api("GET","/api/screens")||{};fillViews();schedule()}catch(e){}}
+async function loadSettings(){try{settings=await api("GET","/api/settings");fillForms();schedule()}catch(e){toast("Could not load the settings: "+e.message)}}
+let rafPending=false;function schedule(){if(!rafPending){rafPending=true;requestAnimationFrame(()=>{rafPending=false;render()})}}
+function setFoot(t,bad){$("foot").innerHTML=`<span class="dot ${bad?"bad":"ok"}"></span>`+esc(t)}
+
+// Device drawing, in the device's own 480x320 coordinates.
+function themeCols(){return(!S||S.theme!=="light")?{bg:"#000",fg:"#F2F4F7",dim:"#8D96A3",panel:"#1C2128",rule:"#2A3038"}:{bg:"#F3F4F1",fg:"#15191F",dim:"#6B737E",panel:"#E2E6EA",rule:"#CFD5DB"}}
+function accent(){return(S&&S.accent)||"#35D0FF"}
+function col(c){if(!c)return null;if(Array.isArray(c))return`rgb(${c.map(n=>Math.max(0,Math.min(255,+n|0))).join(",")})`;if(c==="accent")return accent();return COLORS[c]||(/^#[0-9a-f]{6}$/i.test(c)?c:null)}
+const deg=v=>v==null?"–":Math.round(v)+"°";
+function ageStr(s){const m=Math.floor(s/60);if(m<1)return"now";if(m<60)return m+"m";if(m<1440)return Math.floor(m/60)+"h "+String(m%60).padStart(2,"0")+"m";return Math.floor(m/1440)+"d "+Math.floor(m%1440/60)+"h"}
+const box=(x,y,w,h)=>`left:${x}px;top:${y}px;width:${w}px;height:${h}px;`;
+function txt(x,y,s,size,color,align,w,weight){const a=align||"left",ww=w||300,left=a==="center"?x-ww/2:a==="right"?x-ww:x;return`<div style="${box(left,y-size*.62,ww,size*1.25)}font-size:${size}px;line-height:${size*1.25}px;color:${color};text-align:${a};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;${weight?"font-weight:"+weight:""}">${esc(s)}</div>`}
+function icon(x,y,size,paths,color,sw){return`<div style="${box(x,y,size,size)}">${svg(paths,size,color,sw)}</div>`}
+function navDots(t){if(!S||!S.views)return"";const n=S.views.length,sp=14,x0=240-sp*(n-1)/2;return S.views.map((v,i)=>`<div style="${box(x0+i*sp-3.5,309,7,7)}border-radius:50%;background:${v.name===S.view?t.fg:t.rule}"></div>`).join("")}
+function drawHome(t){
+  let h=txt(14,62,S.time||"--:--",96,t.fg,"left",300,"300");
+  const d=S.date;h+=txt(18,128,d?`${DAYS[d.weekday]} ${d.day} ${MONTHS[d.month-1]}`:"Waiting for the time",22,t.fg);
+  const w=S.weather;
+  if(w)h+=icon(330,22,48,wxPaths(w.condition,w.is_day),t.dim,1.6)+txt(386,48,deg(w.temp_c),42,t.fg,"left",90)+txt(400,98,LABEL[w.condition]||w.condition,16,t.fg,"center",150)+txt(400,122,`${deg(w.min_c)} / ${deg(w.max_c)}`,16,t.dim,"center",150);
+  else h+=txt(400,60,"No weather yet",15,t.dim,"center",150)+txt(400,82,"Comes in over MQTT",15,t.dim,"center",150);
+  h+=`<div style="${box(14,148,452,1)}background:${t.rule}"></div>`;
+  const items=S.items||[],rows=items.length>5?4:5;
+  if(!items.length)h+=txt(240,230,"All quiet",20,t.dim,"center",300);
+  items.slice(0,rows).forEach((it,i)=>{const y=171+i*29,c=col(it.color)||COLORS.grey;h+=it.icon&&IC[it.icon]?icon(13,y-9,18,IC[it.icon],c,2.2):`<div style="${box(16,y-6,12,12)}border-radius:50%;background:${c}"></div>`;h+=txt(38,y,it.text,22,t.fg,"left",320)+txt(466,y,it.detail||ageStr(it.age_s),18,t.dim,"right",110)});
+  if(items.length>5)h+=txt(38,171+4*29,`+${items.length-4} more`,18,t.dim);
+  return h;
+}
+function drawForecast(t){
+  const w=S.weather;if(!w||!w.hours||!w.hours.length)return txt(240,140,"No forecast yet",22,t.fg,"center",400,"600")+txt(240,172,"Send one over MQTT",15,t.dim,"center",400);
+  const hs=w.hours,n=hs.length,lo=Math.min(...hs.map(x=>x.temp_c)),hi=Math.max(...hs.map(x=>x.temp_c)),span=Math.max(hi-lo,1);
+  const X=i=>240-36*(n-1)/2+36*i,Y=v=>110-(v-lo)/span*60;
+  let h=txt(16,18,"Next hours",15,t.dim)+`<svg style="${box(0,0,480,200)}" viewBox="0 0 480 200"><polyline points="${hs.map((x,i)=>X(i)+","+Y(x.temp_c)).join(" ")}" fill="none" stroke="${accent()}" stroke-width="3" stroke-linejoin="round"/>${hs.map((x,i)=>`<circle cx="${X(i)}" cy="${Y(x.temp_c)}" r="3.5" fill="${accent()}"/><rect x="${X(i)-8}" y="${168-x.rain_pct*.3}" width="16" height="${Math.max(x.rain_pct*.3,1)}" rx="2" fill="${COLORS.blue}"/>`).join("")}</svg>`;
+  hs.forEach((x,i)=>{if(i%2===0)h+=txt(X(i),Y(x.temp_c)-16,deg(x.temp_c),14,t.fg,"center",40);h+=txt(X(i),180,String(x.hour).padStart(2,"0"),13,t.dim,"center",30)});
+  (w.days||[]).slice(0,4).forEach((d,i)=>{const x=24+i*112;h+=`<div style="${box(x,194,104,104)}border-radius:8px;background:${t.panel}"></div>`+txt(x+52,212,i===0?"Today":DAYS[d.weekday],20,t.fg,"center",100)+icon(x+36,228,32,wxPaths(d.condition,true),t.dim,1.7)+txt(x+52,280,`${deg(d.max_c)} / ${deg(d.min_c)}`,15,t.fg,"center",100)});
+  return h;
+}
+function drawCalendar(t){
+  const d=S.date;if(!d)return txt(240,150,"Waiting for the time",22,t.dim,"center",400);
+  let h=txt(90,70,DAYS[d.weekday],26,t.dim,"center",170)+txt(90,130,String(d.day),88,t.fg,"center",170,"300")+txt(90,192,MONTHS[d.month-1]+" "+d.year,18,t.fg,"center",170);
+  const w=S.weather;if(w&&w.sunrise)h+=icon(30,226,22,IC.sun,COLORS.yellow,2)+txt(60,237,w.sunrise,16,t.fg)+icon(30,256,22,IC.moon,t.dim,2)+txt(60,267,w.sunset,16,t.fg);
+  const off=(new Date(d.year,d.month-1,1).getDay()+6)%7,dim=new Date(d.year,d.month,0).getDate();
+  DAYS.forEach((n,i)=>h+=txt(214+i*36,40,n.slice(0,2),14,t.dim,"center",34));
+  for(let day=1;day<=dim;day++){const k=off+day-1,c=k%7,x=214+c*36,y=72+Math.floor(k/7)*38;if(day===d.day)h+=`<div style="${box(x-15,y-15,30,30)}border-radius:50%;background:${accent()}"></div>`;h+=txt(x,y,String(day),16,day===d.day?"#000":(c>4?t.dim:t.fg),"center",34)}
+  return h;
+}
+function cells(n){const L={1:[[0,0,1,1]],2:[[0,0,.5,1],[.5,0,.5,1]],3:[[0,0,1/3,1],[1/3,0,1/3,1],[2/3,0,1/3,1]],4:[[0,0,.5,.5],[.5,0,.5,.5],[0,.5,.5,.5],[.5,.5,.5,.5]]};return L[n]||[0,1,2,3,4,5].slice(0,n).map(i=>[(i%3)/3,Math.floor(i/3)*.5,1/3,.5])}
+function drawScreen(t,sc){
+  if(!sc)return txt(240,150,"Screen not received yet",18,t.dim,"center",400);
+  let h="",top=8;
+  if(sc.title){h+=txt(16,22,sc.title,20,t.fg,"left",440,"600");top=42}
+  const ws=(sc.widgets||[]).slice(0,6),H=300-top;
+  if(!ws.length)return h+txt(240,160,"Add a widget",16,t.dim,"center",300);
+  cells(ws.length).forEach((c,i)=>{const x=c[0]*480+6,y=top+c[1]*H+4,w=c[2]*480-12,hh=c[3]*H-8;h+=`<div style="${box(x,y,w,hh)}border-radius:8px;background:${t.panel}"></div>`+widget(t,ws[i]||{},x,y,w,hh)});
+  return h;
+}
+const lbl=(t,s,x,y,w)=>s?txt(x+10,y+16,s,13,t.dim,"left",w-20):"";
+function widget(t,g,x,y,w,h){
+  const c=col(g.color)||accent(),cx=x+w/2,cy=y+h/2,big=Math.min(h*.36,w*.28,64);
+  switch(g.type){
+  case"value":return lbl(t,g.label,x,y,w)+txt(cx,cy+6,String(g.value??"")+(g.unit?" "+g.unit:""),big,c,"center",w-12,g.digits?"200":"500");
+  case"gauge":{const mn=+(g.min??0),mx=+(g.max??100),v=+(g.value??0),f=Math.max(0,Math.min(1,(v-mn)/((mx-mn)||1)));let zc=c;(g.zones||[]).some(z=>v<=+z.to&&(zc=col(z.color)||c));
+    if(g.style==="bar")return lbl(t,g.label,x,y,w)+txt(cx,cy-4,v+(g.unit?" "+g.unit:""),Math.min(big,40),t.fg,"center",w-12)+`<div style="${box(x+12,cy+24,w-24,10)}border-radius:5px;background:${t.rule};overflow:hidden"><div style="height:10px;width:${f*100}%;background:${zc}"></div></div>`;
+    const r=Math.max(10,Math.min(w,h-24)*.36),C=2*Math.PI*r;return lbl(t,g.label,x,y,w)+`<svg style="${box(cx-r-8,cy-r+2,2*r+16,2*r+16)}" viewBox="${-r-8} ${-r-8} ${2*r+16} ${2*r+16}"><circle r="${r}" fill="none" stroke="${t.rule}" stroke-width="9"/><circle r="${r}" fill="none" stroke="${zc}" stroke-width="9" stroke-linecap="round" stroke-dasharray="${C*f} ${C}" transform="rotate(-90)"/></svg>`+txt(cx,cy+10,v+(g.unit||""),Math.min(r*.6,30),t.fg,"center",2*r)}
+  case"chart":{const vs=(g.values||[]).map(Number).filter(n=>!isNaN(n)).slice(-48);if(!vs.length)return lbl(t,g.label,x,y,w);const mn=g.min??Math.min(...vs),mx=g.max??Math.max(...vs),sp=(mx-mn)||1,pw=w-24,py=y+(g.label?30:12),ph=h-(g.label?42:24);let b;
+    if(g.style==="bar"){const bw=pw/vs.length;b=vs.map((v,i)=>{const bh=Math.max(1,(v-mn)/sp*ph);return`<rect x="${(i*bw+1).toFixed(1)}" y="${(ph-bh).toFixed(1)}" width="${Math.max(bw-2,1).toFixed(1)}" height="${bh.toFixed(1)}" fill="${c}" rx="1"/>`}).join("")}
+    else b=`<polyline points="${vs.map((v,i)=>(i*pw/Math.max(vs.length-1,1)).toFixed(1)+","+(ph-(v-mn)/sp*ph).toFixed(1)).join(" ")}" fill="none" stroke="${c}" stroke-width="2.5" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>`;
+    return lbl(t,g.label?g.label+(g.unit?" ("+String(g.unit).trim()+")":""):"",x,y,w)+`<svg style="${box(x+12,py,pw,ph)}" viewBox="0 0 ${pw} ${ph}" preserveAspectRatio="none">${b}</svg>`}
+  case"list":{let s=lbl(t,g.label,x,y,w);const rows=(g.rows||[]).slice(0,6),y0=y+(g.label?36:18),rh=Math.min(26,(h-(y0-y)-6)/Math.max(rows.length,1));rows.forEach((r,i)=>{const yy=y0+i*rh+rh/2;s+=txt(x+12,yy,r.label,15,t.fg,"left",w*.6)+txt(x+w-12,yy,String(r.value??"")+(r.unit?" "+r.unit:""),15,col(r.color)||t.fg,"right",w*.4)});return s}
+  case"grid":{const ts=(g.tiles||[]).slice(0,6),n=ts.length||1,cl=n<=2?n:n<=4?2:3,tw=(w-12)/cl,th=(h-12)/Math.ceil(n/cl);return ts.map((tl,i)=>{const tx=x+6+(i%cl)*tw,ty=y+6+Math.floor(i/cl)*th;return txt(tx+tw/2,ty+th*.32,tl.label,12,t.dim,"center",tw-6)+txt(tx+tw/2,ty+th*.66,String(tl.value??"")+(tl.unit?" "+tl.unit:""),Math.min(th*.32,26),col(tl.color)||t.fg,"center",tw-6)}).join("")}
+  case"progress":{const f=Math.max(0,Math.min(1,(+(g.value??0))/(+(g.max??100)||1)));return lbl(t,g.label,x,y,w)+txt(cx,cy-6,Math.round(f*100)+"%",Math.min(big,36),t.fg,"center",w)+`<div style="${box(x+12,cy+18,w-24,12)}border-radius:6px;background:${t.rule};overflow:hidden"><div style="height:12px;width:${f*100}%;background:${c}"></div></div>`}
+  case"countdown":{const s=Math.max(0,Math.round((+g.until||0)-Date.now()/1000)),d=Math.floor(s/86400),hh=Math.floor(s%86400/3600),mm=Math.floor(s%3600/60),ss=s%60;const v=d?`${d}d ${hh}h`:hh?`${hh}:${String(mm).padStart(2,"0")}`:`${mm}:${String(ss).padStart(2,"0")}`;return lbl(t,g.label,x,y,w)+txt(cx,cy+6,v,big,c,"center",w-12,"300")}
+  case"text":{const sz=g.size==="large"?26:g.size==="small"?14:18;return`<div style="${box(x+12,y+10,w-24,h-20)}font-size:${sz}px;line-height:1.3;color:${col(g.color)||t.fg};overflow:hidden">${esc(g.text)}</div>`}
+  case"icon":{const s=Math.min(h*.4,w*.4,56),has=g.label||g.value!=null;return icon(cx-s/2,has?y+h*.12:cy-s/2,s,IC[g.icon]||IC.info,c,1.8)+(g.value!=null?txt(cx,y+h*.7,String(g.value),Math.min(big*.7,30),t.fg,"center",w-12):"")+(g.label?txt(cx,y+h*.88,g.label,13,t.dim,"center",w-12):"")}
+  case"clock":return txt(cx,cy,(S&&S.time)||"--:--",big*1.1,t.fg,"center",w-8,"300");
+  case"weather":{const wx=S&&S.weather;if(!wx)return txt(cx,cy,"No weather",14,t.dim,"center",w);const s=Math.min(h*.38,w*.3,52);return icon(cx-s-4,cy-s/2-8,s,wxPaths(wx.condition,wx.is_day),t.dim,1.7)+txt(cx+4,cy-8,deg(wx.temp_c),Math.min(big,40),t.fg,"left",w/2)+txt(cx,cy+s/2+8,LABEL[wx.condition]||"",13,t.dim,"center",w-12)}
+  default:return txt(cx,cy,"Unknown widget",13,t.dim,"center",w);
+  }
+}
+function drawView(name){const t=themeCols(),v=(S.views||[]).find(x=>x.name===name);const inner=v&&v.custom?drawScreen(t,screens[name]):name==="forecast"?drawForecast(t):name==="calendar"?drawCalendar(t):drawHome(t);return{bg:t.bg,html:inner+navDots(t)}}
+function fit(dev){const w=dev.parentElement.clientWidth;if(w)dev.style.transform=`scale(${w/480})`}
+const ro=new ResizeObserver(es=>es.forEach(e=>{const d=e.target.querySelector(".dev");if(d)fit(d)}));
+document.querySelectorAll(".screen").forEach(s=>ro.observe(s));
+
+// Rendering
+function render(){
+  if(!S)return;
+  const setup=S.net&&S.net.state==="setup";
+  $("setup").hidden=!setup;$("shell").hidden=setup;if(setup)return;
+  const a=accent(),rgb=parseInt(a.slice(1),16),lum=((rgb>>16)*299+((rgb>>8)&255)*587+(rgb&255)*114)/1000,root=document.documentElement.style;
+  root.setProperty("--accent",a);root.setProperty("--on-accent",lum>150?"#0B1118":"#fff");
+  const n=S.net||{};setFoot(n.state==="connected"?(S.hostname||"Herald")+", "+(n.ip||""):n.state,n.state!=="connected");
+  if(page==="overview")renderOverview();
+  else if(page==="feed")renderFeed();
+  else if(page==="screens"){renderScreensList();renderPreview()}
+  else if(page==="connections")renderRef();
+  else if(page==="system")renderSystem();
+}
+function renderOverview(){
+  $("o-host").textContent=S.hostname||"Herald";
+  const cur=(S.views||[]).find(v=>v.name===S.view);$("o-sub").textContent=cur?(cur.custom?"showing the screen "+S.view:"showing "+S.view):"";
+  const dev=$("dev"),d=drawView(S.view);dev.style.background=d.bg;dev.innerHTML=d.html;fit(dev);
+  $("sleep").hidden=!S.asleep;
+  const vb=$("viewbar"),names=(S.views||[]).map(v=>v.name).join();
+  if(vb.dataset.names!==names){vb.dataset.names=names;vb.innerHTML=(S.views||[]).map(v=>`<button data-view="${esc(v.name)}">${esc(v.name[0].toUpperCase()+v.name.slice(1))}</button>`).join("")}
+  for(const b of vb.children)b.setAttribute("aria-pressed",b.dataset.view===S.view);
+  $("power").setAttribute("aria-pressed",String(!S.asleep));$("power").textContent=S.asleep?"Display off":"Display on";
+  if(document.activeElement!==$("o-bright")){$("o-bright").value=S.brightness;$("o-bright-v").textContent=S.brightness+"%"}
+  const n=S.net||{},rs=n.rssi,q=rs==null?"":rs>-60?"strong":rs>-72?"good":rs>-82?"weak":"poor";
+  const rows=[["WiFi",`<span class="dot ${n.state==="connected"?(rs!=null&&rs<-80?"warn":"ok"):"bad"}"></span>${esc(n.ssid||n.state)}${rs!=null?` (${rs} dBm, ${q})`:""}`],["MQTT",`<span class="dot ${S.mqtt==="connected"?"ok":S.mqtt==="off"?"":"warn"}"></span>${esc(S.mqtt)}`],["Address",esc(n.ip||"–")],["Clock",S.time?"set":"waiting for the time server"],["Night mode",S.night?"on now":"off"],["Rotation",S.rotate?"on":"off"],["Running for",ageStr(S.uptime_s||0).replace("now","under a minute")],["Free memory",S.heap_free!=null?Math.round(S.heap_free/1024)+" KB":"–"]];
+  $("facts").innerHTML=rows.map(([k,v])=>`<dt>${k}</dt><dd>${v}</dd>`).join("");
+}
+function renderFeed(){
+  const it=S.items||[];$("f-count").textContent=it.length?it.length+(it.length===1?" item":" items"):"";
+  $("f-topic").textContent=(S.mqtt_prefix||"herald")+"/item/<id>";
+  $("f-list").innerHTML=it.length?it.map(i=>{const c=col(i.color)||COLORS.grey;return`<li>${i.icon&&IC[i.icon]?`<span class="ic">${svg(IC[i.icon],18,c)}</span>`:`<span class="sw" style="background:${c}"></span>`}<div class="grow"><div class="t">${esc(i.text)}</div><div class="sub">${esc(i.id)}, ${i.detail?esc(i.detail)+", ":""}${i.age_s<60?"just now":ageStr(i.age_s)+" ago"}${i.remaining_s!=null?", disappears in "+ageStr(i.remaining_s).replace("now","under a minute"):""}</div></div><button class="icon" data-del="${esc(i.id)}" aria-label="Remove ${esc(i.text)}">&times;</button></li>`}).join(""):'<li class="empty">Nothing in the feed. Items appear here when another system sends them.</li>';
+}
+function renderScreensList(){
+  $("s-topic").textContent=(S.mqtt_prefix||"herald")+"/screen/<name>";
+  const names=Object.keys(screens).sort(),key=JSON.stringify(screens);if($("s-list").dataset.k===key)return;$("s-list").dataset.k=key;
+  $("s-list").innerHTML=names.length?names.map(n=>{const s=screens[n]||{},k=(s.widgets||[]).length;return`<li><div class="grow"><div class="t">${esc(s.title||n)}</div><div class="sub">${esc(n)}, ${k} ${k===1?"widget":"widgets"}${s.lifetime?", disappears after "+s.lifetime+" s without an update":""}</div></div><button data-show="${esc(n)}">Show</button><button data-edit="${esc(n)}">Edit</button><button class="icon danger" data-sdel="${esc(n)}" aria-label="Delete ${esc(n)}">&times;</button></li>`}).join(""):'<li class="empty">No screens yet. Create one here, or publish one over MQTT.</li>';
+}
+let logT=0;
+function renderSystem(){
+  const f=S.firmware||{};
+  $("sys-facts").innerHTML=[["Firmware","Herald "+esc(S.version)],["Running from",esc(f.slot||"–")],["Updates over WiFi",f.ota?"available":"not available on this build"],["Host name",esc(S.hostname||"–")],["Running for",ageStr(S.uptime_s||0)],["Free memory",S.heap_free!=null?Math.round(S.heap_free/1024)+" KB":"–"]].map(([k,v])=>`<dt>${k}</dt><dd>${v}</dd>`).join("");
+  if(Date.now()-logT>4000){logT=Date.now();loadLog()}
+}
+async function loadLog(){try{const r=await fetch("/api/log",{headers:hdr()}),t=await r.text(),el=$("log"),atEnd=el.scrollTop+el.clientHeight>=el.scrollHeight-8;el.textContent=r.ok?(t||"No log lines yet."):"The log is not available (HTTP "+r.status+").";if(atEnd)el.scrollTop=el.scrollHeight}catch(e){}}
+
+// Topic reference
+let refKey="";
+function renderRef(){
+  const p=S.mqtt_prefix||"herald",h=(settings&&settings.mqtt_host)||"BROKER";if(refKey===p+h)return;refKey=p+h;
+  const P=esc(p),H=esc(h),row=(t,pl,e)=>`<tr><td><code>${P}/${t}</code></td><td>${pl}</td><td>${e}</td></tr>`;
+  $("ref").innerHTML=`<p class="muted">With your prefix <code>${P}</code>. Send states, such as an open window, as retained messages so they come back after a restart.</p>
+<div class="tbl"><table><tr><th>Topic</th><th>Payload</th><th>Effect</th></tr>
+${row("item/&lt;id&gt;","text, or item JSON","adds or updates the item; empty removes it")}
+${row("clear","anything","empties the feed")}
+${row("screen/&lt;name&gt;","screen JSON","adds or updates a screen; empty removes it")}
+${row("weather","weather JSON","replaces the weather; empty removes it")}
+${row("view","<code>home</code>, <code>forecast</code>, <code>calendar</code> or a screen name","switches the view")}
+${row("settings","any settings, e.g. <code>{\"rotate\":true}</code>","changes only those settings")}
+<tr><th colspan="3">Published by the device</th></tr>
+${row("status","<code>online</code> or <code>offline</code>","retained; offline is the last will")}
+${row("state","state JSON","retained, on every change and once a minute")}
+${row("error","<code>{topic, status, error, payload}</code>","why a message was rejected")}
+${row("log","text","warnings and errors from the device")}
+</table></div>
+<h3>Item</h3><p class="muted small">Plain text works, or JSON where only <code>text</code> is needed. Colour: <code>red</code>, <code>yellow</code>, <code>blue</code>, <code>green</code>, <code>grey</code>, <code>#RRGGBB</code> or <code>[r,g,b]</code>. <code>since</code> is the Unix time the state began, <code>age</code> how long it has lasted, <code>ttl</code> removes it after that many seconds.</p>
+<pre><code>{"text": "Kitchen window open", "color": "red", "icon": "window",
+ "detail": "21°C", "since": 1795334400, "ttl": 900, "wake": true, "beep": false}</code></pre>
+<h3>Screen</h3><p class="muted small">Up to 6 widgets: value, gauge, chart, list, grid, progress, countdown, text, icon, clock, weather. The Screens page builds this for you.</p>
+<pre><code>{"title": "Energy", "widgets": [
+  {"type": "value", "label": "Solar", "value": 3.2, "unit": "kW", "color": "yellow"},
+  {"type": "gauge", "label": "Battery", "value": 64, "unit": "%"},
+  {"type": "chart", "label": "Today", "values": [0, 0.4, 1.8, 3.1, 3.2]}]}</code></pre>
+<h3>Weather</h3><p class="muted small">Only <code>temp</code> and <code>condition</code> are needed; Home Assistant condition names work. Weather not refreshed for 3 hours disappears.</p>
+<pre><code>{"temp": 4.2, "condition": "rainy", "min": 1, "max": 6, "is_day": true,
+ "sunrise": "07:38", "sunset": "16:05",
+ "hourly": [{"hour": 17, "temp": 3.9, "rain": 40, "condition": "rainy"}],
+ "daily": [{"date": "2026-11-22", "min": 1, "max": 6, "condition": "cloudy"}]}</code></pre>
+<h3>From the command line</h3>
+<pre><code>mosquitto_pub -h ${H} -r -t ${P}/item/window.kitchen -m "Kitchen window open"
+mosquitto_pub -h ${H} -r -t ${P}/item/window.kitchen -n      # closed
+mosquitto_sub -h ${H} -t '${P}/#' -v                         # watch everything</code></pre>
+<h3>Home Assistant: a window</h3>
+<pre><code>alias: Herald kitchen window
+triggers:
+  - trigger: state
+    entity_id: binary_sensor.kitchen_window
+actions:
+  - action: mqtt.publish
+    data:
+      topic: ${P}/item/window.kitchen
+      retain: true
+      payload: &gt;-
+        {% if trigger.to_state.state == 'on' %}
+        {"text": "Kitchen window open", "color": "red", "icon": "window",
+         "since": {{ as_timestamp(trigger.to_state.last_changed) | int }}}
+        {% endif %}</code></pre>
+<h3>Home Assistant: the weather</h3>
+<pre><code>alias: Herald weather
+triggers:
+  - trigger: time_pattern
+    minutes: "/15"
+  - trigger: homeassistant
+    event: start
+actions:
+  - action: weather.get_forecasts
+    target: { entity_id: weather.home }
+    data: { type: hourly }
+    response_variable: hourly
+  - action: weather.get_forecasts
+    target: { entity_id: weather.home }
+    data: { type: daily }
+    response_variable: daily
+  - action: mqtt.publish
+    data:
+      topic: ${P}/weather
+      retain: true
+      payload: &gt;-
+        {% set w = 'weather.home' %}
+        {% set ns = namespace(h=[], d=[]) %}
+        {% for f in hourly[w].forecast[:12] %}
+          {% set ns.h = ns.h + [{"hour": (f.datetime | as_datetime | as_local).hour,
+            "temp": f.temperature, "rain": f.precipitation_probability or 0,
+            "condition": f.condition}] %}
+        {% endfor %}
+        {% for f in daily[w].forecast[:4] %}
+          {% set ns.d = ns.d + [{"date": (f.datetime | as_datetime | as_local).date() | string,
+            "min": f.get('templow', f.temperature), "max": f.temperature,
+            "condition": f.condition}] %}
+        {% endfor %}
+        {{ {"temp": state_attr(w, 'temperature'), "condition": states(w),
+            "is_day": is_state('sun.sun', 'above_horizon'),
+            "sunrise": as_timestamp(state_attr('sun.sun', 'next_rising')) | timestamp_custom('%H:%M'),
+            "sunset": as_timestamp(state_attr('sun.sun', 'next_setting')) | timestamp_custom('%H:%M'),
+            "hourly": ns.h, "daily": ns.d} | to_json }}</code></pre>`;
+}
+
+// Settings forms: each page sends only what changed.
+const fields=sec=>[...sec.querySelectorAll("[data-key]")];
+function readField(el){
+  const t=el.dataset.type;
+  if(t==="bool")return el.checked;
+  if(t==="int")return el.value===""?null:Number(el.value);
+  if(t==="color")return el.value.toUpperCase();
+  if(t==="views")return[...el.querySelectorAll("input:checked")].map(i=>i.value);
+  if(t==="tz")return el.value==="custom"?$("c-tzc").value.trim():ZONES[el.value];
+  return el.value.trim();
+}
+function writeField(el,v){
+  const t=el.dataset.type;
+  if(t==="bool")el.checked=!!v;
+  else if(t==="color")el.value=String(v||"#000000").toLowerCase();
+  else if(t==="views"){const have=new Set(v||[]),list=[...new Set(["home","forecast","calendar","screens",...Object.keys(screens).sort(),...(v||[])])];el.innerHTML=list.map(n=>`<label class="chip"><input type="checkbox" value="${esc(n)}" ${have.has(n)?"checked":""}>${n==="screens"?"All screens":esc(n)}</label>`).join("")}
+  else if(t==="tz"){const k=Object.keys(ZONES).find(z=>ZONES[z]===v);el.value=k||"custom";$("c-tzc-f").hidden=!!k;$("c-tzc").value=v||""}
+  else el.value=v??"";
+  const out=document.querySelector(`[data-out="${el.id}"]`);if(out)out.textContent=el.value+"%";
+}
+function fillForms(){if(!settings)return;for(const sec of document.querySelectorAll("[data-form]"))for(const el of fields(sec))writeField(el,settings[el.dataset.key]);$("c-mdns").textContent=(settings.hostname||"herald")+".local";updateDirty()}
+function fillViews(){if(settings){const el=$("d-rviews"),cur=readField(el);writeField(el,cur.length?cur:settings.rotate_views);updateDirty()}}
+function diff(sec){const d={};for(const el of fields(sec)){const k=el.dataset.key,v=readField(el);if(k in settings&&JSON.stringify(v)!==JSON.stringify(settings[k]))d[k]=v}return d}
+const curSec=()=>document.querySelector(`[data-page="${page}"]`);
+function updateDirty(){
+  const sec=curSec(),bar=$("savebar");
+  if(!settings||!sec||!sec.hasAttribute("data-form")){bar.hidden=true;return}
+  const n=Object.keys(diff(sec)).length,m=$("save-msg");bar.hidden=!n&&!m.classList.contains("err");
+  if(n&&!m.classList.contains("err"))m.textContent=n===1?"1 unsaved change":n+" unsaved changes";
+}
+function clearErrs(sec){sec.querySelectorAll(".field.has-err").forEach(f=>f.classList.remove("has-err"));sec.querySelectorAll(".err.dyn").forEach(e=>e.remove());$("save-msg").classList.remove("err")}
+function showErr(sec,msg){
+  const key=Object.keys(settings).sort((a,b)=>b.length-a.length).find(k=>msg.startsWith(k+" ")||msg.includes("`"+k+"`")||msg.includes(" "+k+" ")||msg.includes(k+":"));
+  const el=key&&sec.querySelector(`[data-key="${key}"]`);
+  if(el){const f=el.closest(".field")||el.parentElement;f.classList.add("has-err");const e=document.createElement("span");e.className="err dyn";e.textContent=msg;f.append(e);if(el.focus)el.focus()}
+  const m=$("save-msg");m.textContent=msg;m.classList.add("err");$("savebar").hidden=false;
+}
+document.addEventListener("input",e=>{const el=e.target;if(!el.closest||!(el.closest("[data-key]")||el.id==="c-tzc"))return;const out=document.querySelector(`[data-out="${el.id}"]`);if(out)out.textContent=el.value+"%";if(el.id==="c-tz")$("c-tzc-f").hidden=el.value!=="custom";updateDirty()});
+document.addEventListener("change",e=>{if(e.target.closest&&e.target.closest("[data-key]"))updateDirty()});
+$("discard").onclick=()=>{clearErrs(curSec());fillForms()};
+$("save").onclick=async()=>{
+  const sec=curSec();clearErrs(sec);const d=diff(sec);if(!Object.keys(d).length){updateDirty();return}
+  $("save").disabled=true;
+  try{settings=await api("PUT","/api/settings",d);if("token" in d){token=d.token;try{localStorage.setItem("herald-token",token)}catch(e){}}fillForms();toast("Saved");etag="";poll()}
+  catch(e){showErr(sec,e.message)}
+  finally{$("save").disabled=false}
 };
-const VIEWS = ["home", "face", "forecast", "calendar"];
-const DOTS = { red: "#ff5a4f", yellow: "#ffc42e", blue: "#4a9bff", green: "#3dd68c", grey: "#8a8f98" };
-let place = { location: "", latitude: 0, longitude: 0 };
-let token = "";
-try { token = localStorage.getItem("buddy-token") || ""; } catch (e) {}
 
-function say(text, isError) {
-  $("msg").textContent = text;
-  $("msg").className = isError ? "err" : "dim";
+// Screen builder
+const WFIELDS={
+value:[["label","text","Label"],["value","text","Value"],["unit","text","Unit"],["color","color","Colour"],["digits","bool","Thin digits"]],
+gauge:[["label","text","Label"],["value","num","Value"],["min","num","Minimum"],["max","num","Maximum"],["unit","text","Unit"],["style","sel:ring,bar","Style"],["color","color","Colour"]],
+chart:[["label","text","Label"],["values","nums","Values, comma-separated"],["min","num","Minimum"],["max","num","Maximum"],["style","sel:line,bar","Style"],["unit","text","Unit"],["color","color","Colour"]],
+list:[["label","text","Label"],["rows","rows","Rows, one per line: label = value"]],
+grid:[["tiles","rows","Tiles, one per line: label = value"]],
+progress:[["label","text","Label"],["value","num","Value"],["max","num","Out of"],["color","color","Colour"]],
+countdown:[["label","text","Label"],["until","when","Until"],["color","color","Colour"]],
+text:[["text","area","Text"],["size","sel:medium,small,large","Size"],["color","color","Colour"]],
+icon:[["icon","sel:"+Object.keys(IC).join(","),"Icon"],["label","text","Label"],["value","text","Value"],["color","color","Colour"]],
+clock:[],weather:[]};
+const WNAME={value:"Big value",gauge:"Gauge",chart:"Chart",list:"List",grid:"Tiles",progress:"Progress",countdown:"Countdown",text:"Text",icon:"Icon and value",clock:"Clock",weather:"Weather"};
+const DEF={value:{label:"Solar",value:"3.2",unit:"kW",color:"yellow"},gauge:{label:"Battery",value:64,unit:"%"},chart:{label:"Power",values:[0,1,3,2,4,3]},list:{label:"Rooms",rows:[{label:"Kitchen",value:"21°"},{label:"Office",value:"23°"}]},grid:{tiles:[{label:"Inside",value:"21°"},{label:"Outside",value:"4°"}]},progress:{label:"Download",value:40},countdown:{label:"Train"},text:{text:"Hello from Herald"},icon:{icon:"mail",label:"Post",value:"2"},clock:{},weather:{}};
+let ed=null;
+$("e-add-type").innerHTML=Object.keys(WFIELDS).map(k=>`<option value="${k}">${WNAME[k]}</option>`).join("");
+function openEditor(name){
+  ed=name?JSON.parse(JSON.stringify(screens[name]||{widgets:[]})):{title:"",widgets:[{type:"value",...DEF.value}]};
+  if(!Array.isArray(ed.widgets))ed.widgets=[];
+  $("editor").hidden=false;$("e-head").textContent=name?"Edit "+name:"New screen";
+  $("e-name").value=name||"";$("e-name").disabled=!!name;$("e-title").value=ed.title||"";$("e-life").value=ed.lifetime||"";$("e-name-err").textContent="";
+  const m=$("e-msg");m.textContent=name?"Published":"Not published yet";m.classList.remove("err");
+  drawWidgets();syncJson();$("editor").scrollIntoView({behavior:matchMedia("(prefers-reduced-motion: reduce)").matches?"auto":"smooth"});
 }
-
-async function api(method, path, body) {
-  const headers = {};
-  if (token) headers["X-Buddy-Token"] = token;
-  if (body !== undefined) headers["Content-Type"] = "application/json";
-  const res = await fetch(path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
-  const data = await res.json().catch(() => ({}));
-  if (res.status === 401) $("token-box").hidden = false;
-  if (!res.ok) throw new Error(data.error || ("HTTP " + res.status));
-  return data;
+function fieldHtml(i,[k,t,l],w){
+  const id=`w${i}-${k}`,v=w[k],at=`id="${id}" data-w="${i}" data-f="${k}" data-t="${t.startsWith("sel:")?"sel":t}"`;
+  if(t==="bool")return`<label class="check"><input type="checkbox" ${at} ${v?"checked":""}> ${l}</label>`;
+  if(t.startsWith("sel:"))return`<div class="field"><label for="${id}">${l}</label><select ${at}>${t.slice(4).split(",").map(o=>`<option ${o===(v||"")?"selected":""}>${o}</option>`).join("")}</select></div>`;
+  if(t==="area"||t==="rows"){const val=t==="rows"?(v||[]).map(r=>`${r.label} = ${r.value}${r.color?" | "+r.color:""}`).join("\n"):(v||"");return`<div class="field wide"><label for="${id}">${l}</label><textarea ${at} rows="3">${esc(val)}</textarea></div>`}
+  if(t==="when"){const d=v?new Date(v*1000):null,loc=d?new Date(d.getTime()-d.getTimezoneOffset()*6e4).toISOString().slice(0,16):"";return`<div class="field"><label for="${id}">${l}</label><input type="datetime-local" ${at} value="${loc}"></div>`}
+  const val=t==="nums"?(v||[]).join(", "):Array.isArray(v)?"#"+v.map(n=>(+n).toString(16).padStart(2,"0")).join(""):(v??"");
+  return`<div class="field"><label for="${id}">${l}</label><input type="${t==="num"?"number":"text"}" ${t==="num"?'step="any"':""} ${at} value="${esc(val)}" ${t==="color"?'list="colnames" placeholder="accent"':""}></div>`;
 }
-
-async function run(what, fn) {
-  try { await fn(); say(what + ": done"); refresh(); }
-  catch (e) { say(what + " failed: " + e.message, true); }
+function drawWidgets(){
+  const ws=ed.widgets;
+  $("e-widgets").innerHTML=ws.map((w,i)=>`<div class="wg"><div class="wh"><strong>${WNAME[w.type]||esc(w.type)}</strong><button class="icon" data-mv="${i},-1" aria-label="Move up" ${i?"":"disabled"}>&#8593;</button><button class="icon" data-mv="${i},1" aria-label="Move down" ${i<ws.length-1?"":"disabled"}>&#8595;</button><button class="icon danger" data-rm="${i}" aria-label="Remove widget">&times;</button></div><div class="form">${(WFIELDS[w.type]||[]).map(f=>fieldHtml(i,f,w)).join("")||'<p class="muted small" style="margin:0">Nothing to set: it shows live data from the device.</p>'}</div></div>`).join("")+'<datalist id="colnames"><option>red</option><option>yellow</option><option>blue</option><option>green</option><option>grey</option><option>white</option><option>accent</option></datalist>';
+  $("e-add").disabled=ws.length>=6;
 }
-
-function age(s) {
-  const m = Math.floor(s / 60);
-  if (m < 1) return "now";
-  if (m < 60) return m + "m";
-  if (m < 1440) return Math.floor(m / 60) + "h " + String(m % 60).padStart(2, "0") + "m";
-  return Math.floor(m / 1440) + "d " + Math.floor(m % 1440 / 60) + "h";
-}
-
-function showItems(items) {
-  const ul = $("items");
-  ul.textContent = "";
-  if (!items.length) {
-    const li = document.createElement("li"); li.className = "dim"; li.textContent = "Nothing in the feed.";
-    ul.append(li);
-  }
-  for (const it of items) {
-    const li = document.createElement("li");
-    const dot = document.createElement("span"); dot.className = "dot"; dot.style.background = DOTS[it.color];
-    const text = document.createElement("span"); text.className = "text"; text.textContent = it.text;
-    const right = document.createElement("span"); right.className = "dim"; right.textContent = it.detail || age(it.age_s);
-    const del = document.createElement("button"); del.textContent = "Remove"; del.title = it.id;
-    del.onclick = () => run("Remove", () => api("DELETE", "/api/items/" + encodeURIComponent(it.id)));
-    li.append(dot, text, right, del);
-    ul.append(li);
-  }
-}
-
-function showState(s) {
-  const rows = [
-    ["Time", s.time || "not set"],
-    ["Network", s.net.state + (s.net.ip ? " (" + s.net.ip + ")" : "") + (s.net.ssid ? " (" + s.net.ssid + ")" : "")],
-    ["View", s.view + (s.asleep ? ", asleep" : "")],
-    ["Rotation", s.rotate ? "on" : "off"],
-    ["MQTT", s.mqtt],
-    ["Weather", s.weather ? Math.round(s.weather.temp_c) + " °C, " + s.weather.condition : "none"],
-    ["Firmware", s.version]
-  ];
-  const dl = $("state");
-  dl.textContent = "";
-  for (const [k, v] of rows) {
-    const dt = document.createElement("dt"); dt.textContent = k;
-    const dd = document.createElement("dd"); dd.textContent = v;
-    dl.append(dt, dd);
-  }
-  if (s.token_required && !token) $("token-box").hidden = false;
-  showItems(s.items);
-}
-
-async function refresh() {
-  try { showState(await api("GET", "/api/state")); } catch (e) { say("Device not reachable", true); }
-}
-
-function showSettings(s) {
-  $("s-theme").value = s.theme;
-  $("s-accent").value = s.accent_color.toLowerCase();
-  $("s-brightness").value = s.brightness;
-  $("s-brightness-out").textContent = s.brightness + "%";
-  $("s-sleep").value = s.sleep_secs;
-  $("s-rotate").checked = s.rotate;
-  $("s-rotate-secs").value = s.rotate_secs;
-  $("s-rotate-from").value = s.rotate_from;
-  $("s-rotate-until").value = s.rotate_until;
-  for (const v of VIEWS) $("s-rv-" + v).checked = s.rotate_views.includes(v);
-  $("s-token").value = s.token;
-  $("s-mqtt-host").value = s.mqtt_host;
-  $("s-mqtt-port").value = s.mqtt_port;
-  $("s-mqtt-user").value = s.mqtt_user;
-  $("s-mqtt-pass").value = s.mqtt_password;
-  $("s-mqtt-prefix").value = s.mqtt_prefix;
-  $("s-mqtt-topics").textContent = "Items: " + s.mqtt_prefix + "/item/<id>, view: " + s.mqtt_prefix + "/view, state: " + s.mqtt_prefix + "/state";
-  const known = Object.keys(ZONES).find(k => ZONES[k] === s.timezone);
-  $("s-tz").value = known || "custom";
-  $("s-tz-custom").hidden = !!known;
-  $("s-tz-custom").value = s.timezone;
-  place = { location: s.location, latitude: s.latitude, longitude: s.longitude };
-  $("s-city").value = s.location;
-  showPlace();
-}
-
-function showPlace() {
-  $("s-place").textContent = place.location
-    ? place.location + " (" + place.latitude.toFixed(2) + ", " + place.longitude.toFixed(2) + ")"
-    : "No location: the weather view stays empty.";
-}
-
-async function loadSettings() {
-  try { showSettings(await api("GET", "/api/settings")); }
-  catch (e) { say("Could not load settings: " + e.message, true); }
-}
-
-for (const v of VIEWS) {
-  const label = document.createElement("label"); label.className = "check";
-  const box = document.createElement("input"); box.type = "checkbox"; box.id = "s-rv-" + v;
-  label.append(box, v);
-  $("s-rotate-views").append(label);
-}
-for (const name of Object.keys(ZONES)) $("s-tz").add(new Option(name, name));
-$("s-tz").add(new Option("Custom POSIX string", "custom"));
-$("s-tz").onchange = () => { $("s-tz-custom").hidden = $("s-tz").value !== "custom"; };
-$("s-brightness").oninput = () => { $("s-brightness-out").textContent = $("s-brightness").value + "%"; };
-
-$("s-find").onclick = () => run("Location search", async () => {
-  const name = $("s-city").value.trim();
-  if (!name) { place = { location: "", latitude: 0, longitude: 0 }; showPlace(); return; }
-  // Runs in your browser, not on the device.
-  const res = await fetch("https://geocoding-api.open-meteo.com/v1/search?count=1&name=" + encodeURIComponent(name));
-  const hit = ((await res.json()).results || [])[0];
-  if (!hit) throw new Error("no place called " + name);
-  place = { location: hit.name.slice(0, 40), latitude: hit.latitude, longitude: hit.longitude };
-  $("s-city").value = place.location;
-  showPlace();
+function parseRows(s){return s.split("\n").map(l=>l.trim()).filter(Boolean).map(l=>{const[a,c]=l.split("|").map(x=>x.trim()),[lb,...rest]=a.split("="),r={label:lb.trim(),value:rest.join("=").trim()};if(c)r.color=c;return r})}
+$("e-widgets").addEventListener("input",e=>{
+  const el=e.target,k=el.dataset.f;if(!k)return;const w=ed.widgets[+el.dataset.w],t=el.dataset.t;let v;
+  if(t==="bool")v=el.checked||undefined;else if(t==="num")v=el.value===""?undefined:Number(el.value);else if(t==="nums")v=el.value.split(/[,\s]+/).filter(Boolean).map(Number).filter(n=>!isNaN(n));else if(t==="rows")v=parseRows(el.value);else if(t==="when")v=el.value?Math.round(new Date(el.value).getTime()/1000):undefined;else v=el.value===""?undefined:el.value;
+  if(v===undefined)delete w[k];else w[k]=v;dirtyEd();
 });
-
-$("s-save").onclick = () => run("Save", async () => {
-  const tz = $("s-tz").value === "custom" ? $("s-tz-custom").value.trim() : ZONES[$("s-tz").value];
-  const newToken = $("s-token").value.trim();
-  const saved = await api("PUT", "/api/settings", {
-    theme: $("s-theme").value, accent_color: $("s-accent").value,
-    brightness: Number($("s-brightness").value), sleep_secs: Number($("s-sleep").value),
-    rotate: $("s-rotate").checked, rotate_secs: Number($("s-rotate-secs").value),
-    rotate_from: $("s-rotate-from").value || "00:00", rotate_until: $("s-rotate-until").value || "00:00",
-    rotate_views: VIEWS.filter(v => $("s-rv-" + v).checked),
-    timezone: tz, token: newToken, ...place,
-    mqtt_host: $("s-mqtt-host").value.trim(), mqtt_port: Number($("s-mqtt-port").value),
-    mqtt_user: $("s-mqtt-user").value, mqtt_password: $("s-mqtt-pass").value,
-    mqtt_prefix: $("s-mqtt-prefix").value.trim()
-  });
-  token = newToken;
-  try { localStorage.setItem("buddy-token", token); } catch (e) {}
-  showSettings(saved);
-});
-
-$("use-token").onclick = () => {
-  token = $("my-token").value.trim();
-  try { localStorage.setItem("buddy-token", token); } catch (e) {}
-  $("token-box").hidden = true;
-  loadSettings();
+$("e-widgets").addEventListener("change",e=>{if(e.target.type==="checkbox"||e.target.tagName==="SELECT")e.target.dispatchEvent(new Event("input",{bubbles:true}))});
+$("e-widgets").addEventListener("click",e=>{const b=e.target.closest("button");if(!b)return;if(b.dataset.rm!=null)ed.widgets.splice(+b.dataset.rm,1);else if(b.dataset.mv){const[i,d]=b.dataset.mv.split(",").map(Number);ed.widgets.splice(i+d,0,ed.widgets.splice(i,1)[0])}else return;drawWidgets();dirtyEd()});
+$("e-add").onclick=()=>{if(ed.widgets.length>=6)return;const t=$("e-add-type").value,w={type:t,...JSON.parse(JSON.stringify(DEF[t]))};if(t==="countdown")w.until=Math.round(Date.now()/1000)+1800;ed.widgets.push(w);drawWidgets();dirtyEd()};
+$("e-title").oninput=()=>{const v=$("e-title").value;if(v)ed.title=v;else delete ed.title;dirtyEd()};
+$("e-life").oninput=()=>{const v=$("e-life").value;if(v)ed.lifetime=Number(v);else delete ed.lifetime;dirtyEd()};
+function dirtyEd(){const m=$("e-msg");m.textContent="Unpublished changes";m.classList.remove("err");syncJson()}
+function syncJson(){$("e-json").value=JSON.stringify(ed,null,1);schedule()}
+function renderPreview(){if(!ed||$("editor").hidden)return;const t=themeCols(),dev=$("e-dev");dev.style.background=t.bg;dev.innerHTML=drawScreen(t,ed);fit(dev)}
+$("e-json-apply").onclick=()=>{try{const v=JSON.parse($("e-json").value);if(!v||!Array.isArray(v.widgets))throw new Error('it needs a "widgets" list');ed=v;$("e-title").value=ed.title||"";$("e-life").value=ed.lifetime||"";drawWidgets();dirtyEd()}catch(e){const m=$("e-msg");m.textContent="JSON not applied: "+e.message;m.classList.add("err")}};
+$("e-copy").onclick=async()=>{try{await navigator.clipboard.writeText(JSON.stringify(ed));toast("JSON copied")}catch(e){$("e-json").select()}};
+$("e-cancel").onclick=()=>{$("editor").hidden=true;ed=null};
+$("e-publish").onclick=async()=>{
+  const name=$("e-name").value.trim().toLowerCase();
+  if(!/^[a-z0-9_-]{1,24}$/.test(name)){$("e-name-err").textContent="Use 1 to 24 characters: a to z, 0 to 9, - and _.";$("e-name").focus();return}
+  $("e-name-err").textContent="";$("e-publish").disabled=true;
+  try{await api("PUT","/api/screens/"+encodeURIComponent(name),ed);screens[name]=JSON.parse(JSON.stringify(ed));$("e-name").disabled=true;$("e-head").textContent="Edit "+name;$("e-msg").textContent="Published";toast("Published "+name);etag="";poll()}
+  catch(e){const m=$("e-msg");m.textContent=e.message;m.classList.add("err")}
+  finally{$("e-publish").disabled=false}
 };
-
-$("it-send").onclick = () => run("Feed", () => {
-  const id = $("it-id").value.trim();
-  if (!id) throw new Error("an id is needed, e.g. window.kitchen");
-  const body = { text: $("it-text").value, color: $("it-color").value, detail: $("it-detail").value };
-  if ($("it-ttl").value) body.ttl = Number($("it-ttl").value);
-  return api("PUT", "/api/items/" + encodeURIComponent(id), body);
+$("s-new").onclick=()=>openEditor(null);
+$("s-list").addEventListener("click",async e=>{const b=e.target.closest("button");if(!b)return;
+  if(b.dataset.edit)openEditor(b.dataset.edit);
+  else if(b.dataset.show){await act("/api/view",{view:b.dataset.show});location.hash="#overview"}
+  else if(b.dataset.sdel&&confirm(`Delete the screen "${b.dataset.sdel}"? It is removed from the device and the broker.`)){try{await api("DELETE","/api/screens/"+encodeURIComponent(b.dataset.sdel));delete screens[b.dataset.sdel];toast("Deleted");schedule()}catch(err){toast(err.message)}}
 });
-$("it-clear").onclick = () => run("Remove all", () => api("DELETE", "/api/items"));
-$("w-save").onclick = () => run("WiFi", () => api("POST", "/api/wifi", { ssid: $("w-ssid").value, password: $("w-pass").value }));
 
-loadSettings();
-refresh();
-setInterval(refresh, 2000);
+// Actions
+async function act(path,body){try{await api("POST",path,body)}catch(e){toast(e.message);return}etag="";setTimeout(poll,60)}
+$("viewbar").addEventListener("click",e=>{const b=e.target.closest("button");if(b)act("/api/view",{view:b.dataset.view})});
+$("prev").onclick=()=>act("/api/swipe",{dir:"right"});
+$("next").onclick=()=>act("/api/swipe",{dir:"left"});
+$("power").onclick=()=>act("/api/display",{on:!!(S&&S.asleep)});
+let brT;$("o-bright").oninput=e=>{const v=+e.target.value;$("o-bright-v").textContent=v+"%";clearTimeout(brT);brT=setTimeout(async()=>{try{settings=await api("PUT","/api/settings",{brightness:v});fillForms()}catch(err){toast(err.message)}},250)};
+$("f-list").addEventListener("click",e=>{const b=e.target.closest("[data-del]");if(b)api("DELETE","/api/items/"+encodeURIComponent(b.dataset.del)).then(()=>{etag="";poll()},err=>toast(err.message))});
+$("f-clear").onclick=()=>{if(confirm("Remove every item from the feed?"))api("DELETE","/api/items").then(()=>{etag="";poll()},err=>toast(err.message))};
+(()=>{const sc=$("screen");let d=null;
+  sc.addEventListener("pointerdown",e=>{d={x:e.clientX,y:e.clientY,t:performance.now()};sc.setPointerCapture(e.pointerId)});
+  sc.addEventListener("pointercancel",()=>{d=null});
+  sc.addEventListener("pointerup",e=>{if(!d)return;const dx=e.clientX-d.x,dy=e.clientY-d.y,held=performance.now()-d.t,r=sc.getBoundingClientRect();d=null;
+    if(Math.abs(dx)>40&&Math.abs(dx)>Math.abs(dy)){act("/api/swipe",{dir:dx<0?"left":"right"});return}
+    const x=Math.round(Math.min(479,Math.max(0,(e.clientX-r.left)*480/r.width))),y=Math.round(Math.min(319,Math.max(0,(e.clientY-r.top)*320/r.height)));
+    act("/api/tap",{x,y,long:held>650})});
+  sc.addEventListener("keydown",e=>{if(e.key==="ArrowLeft")act("/api/swipe",{dir:"right"});else if(e.key==="ArrowRight")act("/api/swipe",{dir:"left"})});
+})();
+$("w-save").onclick=async()=>{if(!confirm("Save this network and restart the device?"))return;try{await api("POST","/api/wifi",{ssid:$("w-ssid").value,password:$("w-pass").value});toast("Saved. The device restarts now.")}catch(e){toast(e.message)}};
+$("su-save").onclick=async()=>{$("su-err").textContent="";try{await api("POST","/api/wifi",{ssid:$("su-ssid").value,password:$("su-pass").value});$("su-save").disabled=true;$("su-save").textContent="Saved. Herald restarts and joins the network."}catch(e){$("su-err").textContent=e.message}};
+$("restart").onclick=()=>{if(confirm("Restart the device now?"))api("POST","/api/restart").then(()=>toast("Restarting"),e=>toast(e.message))};
+$("b-down").onclick=async()=>{try{const s=await api("GET","/api/settings"),a=document.createElement("a");a.href=URL.createObjectURL(new Blob([JSON.stringify(s,null,2)],{type:"application/json"}));a.download="herald-settings.json";a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)}catch(e){toast(e.message)}};
+$("b-up").onchange=async e=>{const f=e.target.files[0];e.target.value="";if(!f)return;try{settings=await api("PUT","/api/settings",JSON.parse(await f.text()));fillForms();toast("Settings restored")}catch(err){toast("Not restored: "+err.message)}};
+function ota(file){
+  if(!file||(!/\.bin$/i.test(file.name)&&!confirm(`${file.name} does not end in .bin. Upload anyway?`)))return;
+  const bar=$("ota-bar"),msg=$("ota-msg");$("ota-progress").hidden=false;bar.value=0;msg.textContent="Uploading "+file.name;
+  const x=new XMLHttpRequest();x.open("POST","/api/ota");if(token)x.setRequestHeader("X-Herald-Token",token);x.setRequestHeader("Content-Type","application/octet-stream");
+  x.upload.onprogress=e=>{if(e.lengthComputable){bar.value=e.loaded/e.total*100;msg.textContent=`Uploading: ${Math.round(e.loaded/1024)} of ${Math.round(e.total/1024)} KB`}};
+  x.onload=()=>{let err="";try{err=JSON.parse(x.responseText).error||""}catch(e){}if(x.status===401){askToken().then(()=>ota(file));return}if(x.status>=200&&x.status<300){bar.value=100;msg.textContent="Written. The device restarts into the new firmware; this page reconnects by itself."}else msg.textContent="Not updated: "+(err||"HTTP "+x.status)};
+  x.onerror=()=>{msg.textContent="The upload was interrupted. The device keeps its current firmware."};x.send(file);
+}
+$("ota-file").onchange=e=>{ota(e.target.files[0]);e.target.value=""};
+(()=>{const d=$("drop");["dragenter","dragover"].forEach(v=>d.addEventListener(v,e=>{e.preventDefault();d.classList.add("over")}));["dragleave","drop"].forEach(v=>d.addEventListener(v,e=>{e.preventDefault();d.classList.remove("over")}));d.addEventListener("drop",e=>ota(e.dataTransfer.files[0]))})();
+
+// Routing
+for(const[id,name,ic]of PAGES)document.querySelector(`[data-nav="${id}"]`).innerHTML=svg(ic,18)+"<span>"+name+"</span>";
+for(const n of Object.keys(ZONES))$("c-tz").add(new Option(n,n));$("c-tz").add(new Option("Custom POSIX string","custom"));
+function route(){
+  const want=(location.hash||"#overview").slice(1);
+  if(want==="mqtt"){location.replace("#connections");return}
+  page=PAGES.some(p=>p[0]===want)?want:"overview";
+  for(const s of document.querySelectorAll("[data-page]"))s.hidden=s.dataset.page!==page;
+  for(const a of document.querySelectorAll("[data-nav]")){if(a.dataset.nav===page)a.setAttribute("aria-current","page");else a.removeAttribute("aria-current")}
+  $("save-msg").classList.remove("err");updateDirty();refKey="";logT=0;$("s-list").dataset.k="";schedule();
+}
+addEventListener("hashchange",route);
+document.addEventListener("visibilitychange",()=>{if(!document.hidden)poll()});
+addEventListener("beforeunload",e=>{const sec=curSec();if(settings&&sec&&sec.hasAttribute("data-form")&&Object.keys(diff(sec)).length){e.preventDefault();e.returnValue=""}});
+route();loadSettings();poll();setInterval(poll,5000);
+// The clock and countdowns tick here between polls.
+setInterval(()=>{if(!document.hidden&&(page==="overview"||(page==="screens"&&ed)))schedule()},1000);
 </script>
 </body>
 </html>

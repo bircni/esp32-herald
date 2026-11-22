@@ -1,20 +1,22 @@
 //! The feed: short items pushed by other machines (an open window, Claude
 //! Code waiting for input, a failed build), shown on the home view.
 
-use crate::model::ItemColor;
+use crate::{model::ItemColor, views::icons::Symbol};
 
 pub const MAX_ITEMS: usize = 16;
 pub const ID_MAX: usize = 32;
 pub const TEXT_MAX: usize = 32;
 pub const DETAIL_MAX: usize = 12;
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Item {
     pub id: String,
     pub text: String,
     /// Shown instead of the elapsed time when not empty.
     pub detail: String,
     pub color: ItemColor,
+    /// Drawn instead of the colour dot.
+    pub icon: Option<Symbol>,
     /// Monotonic time the item's current state began. Negative when the
     /// state began before the device booted.
     pub since_ms: i64,
@@ -22,6 +24,7 @@ pub struct Item {
 }
 
 impl Item {
+    #[must_use]
     pub fn age_ms(&self, now_ms: u64) -> u64 {
         (now_ms as i64).saturating_sub(self.since_ms).max(0) as u64
     }
@@ -33,6 +36,7 @@ pub struct Feed {
     items: Vec<Item>,
 }
 
+#[must_use]
 pub fn valid_id(id: &str) -> bool {
     !id.is_empty()
         && id.len() <= ID_MAX
@@ -42,15 +46,18 @@ pub fn valid_id(id: &str) -> bool {
 }
 
 /// Keeps printable characters only and cuts to `max` characters.
+#[must_use]
 pub fn clean(s: &str, max: usize) -> String {
     s.chars().filter(|c| !c.is_control()).take(max).collect()
 }
 
 impl Feed {
+    #[must_use]
     pub fn items(&self) -> &[Item] {
         &self.items
     }
 
+    #[must_use]
     pub fn get(&self, id: &str) -> Option<&Item> {
         self.items.iter().find(|i| i.id == id)
     }
@@ -58,6 +65,9 @@ impl Feed {
     /// Adds or replaces an item. An update that keeps text and colour keeps
     /// the item's age, so repeated reports of the same state (e.g. "window
     /// open" every minute) do not reset the time shown.
+    ///
+    /// # Errors
+    /// When the feed is full and `item` is new.
     pub fn upsert(&mut self, mut item: Item, explicit_since: bool) -> Result<(), String> {
         match self.items.iter().position(|i| i.id == item.id) {
             Some(pos) => {
@@ -94,12 +104,14 @@ impl Feed {
             .retain(|i| i.until_ms.is_none_or(|until| now_ms < until));
     }
 
+    #[must_use]
     pub fn top(&self) -> Option<&Item> {
         self.items.first()
     }
 }
 
 /// Compact age: `now`, `12m`, `3h 05m`, `2d 4h`.
+#[must_use]
 pub fn age(ms: u64) -> String {
     let m = ms / 60_000;
     match m {
@@ -120,6 +132,7 @@ mod tests {
             text: text.into(),
             detail: String::new(),
             color,
+            icon: None,
             since_ms,
             until_ms: None,
         }
@@ -168,9 +181,10 @@ mod tests {
             f.upsert(item(&format!("i{i}"), "x", ItemColor::Blue, 0), false)
                 .unwrap();
         }
-        assert!(f
-            .upsert(item("one-more", "x", ItemColor::Blue, 0), false)
-            .is_err());
+        assert!(
+            f.upsert(item("one-more", "x", ItemColor::Blue, 0), false)
+                .is_err()
+        );
         assert!(
             f.upsert(item("i3", "y", ItemColor::Red, 0), false).is_ok(),
             "updating an existing item still works"

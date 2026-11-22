@@ -2,9 +2,9 @@
 
 use anyhow::Result;
 use esp_idf_svc::nvs::{EspDefaultNvsPartition, EspNvs, NvsDefault};
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 
-const NAMESPACE: &str = "deskbuddy";
+const NAMESPACE: &str = "herald";
 const KEY_SETTINGS: &str = "settings";
 const KEY_CALIBRATION: &str = "calibration";
 const KEY_WIFI: &str = "wifi";

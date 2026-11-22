@@ -12,6 +12,8 @@ build-std = ["std", "panic_abort"]
 
 [env]
 MCU = "esp32"
+# v5.5.6 fails to create the WiFi task here (ESP_ERR_NO_MEM at boot, with
+# 200 KB free); stay on v5.5.5 until that is understood.
 ESP_IDF_VERSION = "v5.5.5"
 # Keep the ESP-IDF checkout and its tools inside this crate (.embuild/).
 ESP_IDF_TOOLS_INSTALL_DIR = "workspace"

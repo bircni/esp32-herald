@@ -1,12 +1,12 @@
-//! First-boot screens: touch calibration and the WiFi setup instructions.
+//! First-boot screens: touch calibration and the `WiFi` setup instructions.
 
 use embedded_graphics::prelude::*;
 
-use super::{region, Region};
+use super::{Region, region};
 use crate::{
     app::App,
     gfx::{self, Align, Canvas, Font},
-    model::{screen, Calibration, Env, NetState, RawTouch},
+    model::{Calibration, Env, NetState, RawTouch, screen},
     theme::Theme,
 };
 
@@ -140,7 +140,7 @@ pub(crate) fn wifi_regions(env: &Env) -> Vec<Region> {
         NetState::Setup { ssid, password, ip } => {
             gfx::key(&[gfx::str_key(ssid), gfx::str_key(password), gfx::str_key(ip)]) as i64
         }
-        _ => 0,
+        NetState::Offline | NetState::Connecting { .. } | NetState::Connected { .. } => 0,
     };
     vec![region(screen(), &[key])]
 }

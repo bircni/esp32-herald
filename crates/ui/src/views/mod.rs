@@ -11,6 +11,7 @@ use crate::{
 };
 
 pub mod calendar;
+pub mod custom;
 pub mod forecast;
 pub mod home;
 pub mod icons;
@@ -30,29 +31,30 @@ pub(crate) fn region(rect: Rectangle, parts: &[i64]) -> Region {
 }
 
 const NAV_Y: i32 = 312;
-const NAV_SPACING: i32 = 16;
+const NAV_SPACING: i32 = 14;
 
-fn nav_left() -> i32 {
-    240 - NAV_SPACING * (ViewId::ALL.len() as i32 - 1) / 2
+/// Most dots there can be: the built-in views and every custom screen.
+const NAV_MAX: i32 = (ViewId::BUILT_IN.len() + crate::screen::MAX_SCREENS) as i32;
+
+const fn nav_left(n: usize) -> i32 {
+    240 - NAV_SPACING * (n as i32 - 1) / 2
 }
 
-/// The dots at the bottom showing which view is active.
-pub(crate) fn nav_region(view: ViewId) -> Region {
-    let w = NAV_SPACING * ViewId::ALL.len() as i32;
+/// The dots at the bottom: `n` views, the `i`-th active. The region spans
+/// the widest possible row, so dots of removed screens get cleared.
+pub(crate) fn nav_region(i: usize, n: usize) -> Region {
+    let w = NAV_SPACING * NAV_MAX;
     region(
-        gfx::rect(nav_left() - 8, NAV_Y - 5, w as u32, 10),
-        &[view.index() as i64],
+        gfx::rect(240 - w / 2, NAV_Y - 5, w as u32, 10),
+        &[i as i64, n as i64],
     )
 }
 
-pub(crate) fn paint_nav(c: &mut Canvas<'_>, view: ViewId, theme: &Theme) {
-    for (i, v) in ViewId::ALL.into_iter().enumerate() {
-        let center = Point::new(nav_left() + NAV_SPACING * i as i32, NAV_Y);
-        if v == view {
-            gfx::circle(c, center, 8, theme.fg);
-        } else {
-            gfx::circle(c, center, 6, theme.panel);
-        }
+pub(crate) fn paint_nav(c: &mut Canvas<'_>, i: usize, n: usize, theme: &Theme) {
+    for k in 0..n {
+        let center = Point::new(nav_left(n) + NAV_SPACING * k as i32, NAV_Y);
+        let color = if k == i { theme.fg } else { theme.rule };
+        gfx::circle(c, center, 7, color);
     }
 }
 

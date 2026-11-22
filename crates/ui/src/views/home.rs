@@ -1,11 +1,11 @@
-//! The home view: clock and weather on top, the feed below.
+//! The home view: clock and weather on top, the feed below. Laid out like
+//! the web app's mirror (`drawHome` in `web/index.html`).
 
 use embedded_graphics::{prelude::*, primitives::Rectangle};
 
-use super::{icons, region, Region};
+use super::{Region, icons, region};
 use crate::{
     app::App,
-    digits::{self, two, Size7},
     feed::{self, Item},
     gfx::{self, Align, Canvas, Font},
     model::{Env, NetState},
@@ -13,39 +13,37 @@ use crate::{
     weather::deg,
 };
 
-const DIGIT: Size7 = Size7 {
-    w: 44,
-    h: 92,
-    t: 11,
-    gap: 2,
-};
-const DIGIT_Y: i32 = 14;
-const DIGIT_X: [i32; 4] = [16, 70, 140, 194];
-const COLON_X: i32 = 127;
-const DATE: Rectangle = gfx::rect(0, 112, 252, 30);
-const WEATHER: Rectangle = gfx::rect(252, 6, 228, 140);
-const ICON: Point = Point::new(302, 58);
-const DIVIDER: Rectangle = gfx::rect(16, 150, 448, 2);
+const CLOCK: Rectangle = gfx::rect(0, 8, 300, 104);
+const DATE: Rectangle = gfx::rect(0, 112, 300, 32);
+// Wide enough for "Comes in over MQTT" centred at x = 400.
+const WEATHER: Rectangle = gfx::rect(300, 8, 180, 136);
+const DIVIDER: Rectangle = gfx::rect(14, 148, 452, 1);
 
 pub const ROWS: usize = 5;
-const ROW_Y: i32 = 157;
+/// Centre of the first feed row, and the distance between rows.
+const ROW_Y: i32 = 171;
 const ROW_H: i32 = 29;
+/// Text of a feed row ends before the age on the right.
+const ROW_TEXT_W: i32 = 320;
 
-fn row_rect(i: usize) -> Rectangle {
-    gfx::rect(0, ROW_Y + ROW_H * i as i32, 480, ROW_H as u32)
+/// Taller than the row spacing: text in the row font reaches a few pixels
+/// beyond it, and overlapping regions are fine (each repaint draws the
+/// whole view, clipped).
+const ROW_REGION_H: i32 = 34;
+
+const fn row_rect(i: usize) -> Rectangle {
+    let center = ROW_Y + ROW_H * i as i32;
+    gfx::rect(0, center - ROW_REGION_H / 2, 480, ROW_REGION_H as u32)
 }
 
-fn time_digits(env: &Env) -> [Option<u8>; 4] {
-    match env.local {
-        Some(t) => {
-            let (h, m) = (two(u32::from(t.hour)), two(u32::from(t.minute)));
-            [Some(h[0]), Some(h[1]), Some(m[0]), Some(m[1])]
-        }
-        None => [None; 4],
-    }
+fn time_text(env: &Env) -> String {
+    env.local.map_or_else(
+        || "--:--".to_owned(),
+        |t| format!("{:02}:{:02}", t.hour, t.minute),
+    )
 }
 
-fn date_line(env: &Env) -> String {
+pub(crate) fn date_line(env: &Env) -> String {
     match env.local {
         Some(t) => format!(
             "{} {} {}",
@@ -70,11 +68,8 @@ enum Row<'a> {
 fn row(app: &App, i: usize) -> Row<'_> {
     let items = app.feed.items();
     if items.is_empty() {
-        return if i == ROWS / 2 {
-            Row::Quiet
-        } else {
-            Row::Empty
-        };
+        // "All quiet" sits in the middle of the feed area.
+        return if i == 2 { Row::Quiet } else { Row::Empty };
     }
     if items.len() > ROWS && i == ROWS - 1 {
         return Row::More(items.len() - (ROWS - 1));
@@ -91,19 +86,11 @@ fn right_text(item: &Item, now_ms: u64) -> String {
 }
 
 pub(crate) fn regions(app: &App, env: &Env) -> Vec<Region> {
-    let mut regions: Vec<Region> = time_digits(env)
-        .into_iter()
-        .enumerate()
-        .map(|(i, d)| {
-            region(
-                digits::digit_rect(Point::new(DIGIT_X[i], DIGIT_Y), DIGIT),
-                &[d.map_or(-1, i64::from)],
-            )
-        })
-        .collect();
-    regions.push(region(DATE, &[gfx::str_key(&date_line(env))]));
-
-    let mut weather = vec![gfx::str_key(&app.settings.location)];
+    let mut regions = vec![
+        region(CLOCK, &[gfx::str_key(&time_text(env))]),
+        region(DATE, &[gfx::str_key(&date_line(env))]),
+    ];
+    let mut weather = vec![app.weather.is_some().into()];
     if let Some(w) = &app.weather {
         weather.extend([
             w.temp_c.round() as i64,
@@ -122,6 +109,7 @@ pub(crate) fn regions(app: &App, env: &Env) -> Vec<Region> {
                 gfx::str_key(&item.text),
                 gfx::str_key(&right_text(item, env.now_ms)),
                 item.color as i64,
+                item.icon.map_or(-1, |s| s as i64),
             ],
             Row::More(n) => vec![2, n as i64],
             Row::Quiet => vec![3],
@@ -133,66 +121,62 @@ pub(crate) fn regions(app: &App, env: &Env) -> Vec<Region> {
 }
 
 pub(crate) fn paint(app: &App, c: &mut Canvas<'_>, env: &Env, theme: &Theme) {
-    for (i, d) in time_digits(env).into_iter().enumerate() {
-        digits::draw_digit(
-            c,
-            Point::new(DIGIT_X[i], DIGIT_Y),
-            DIGIT,
-            d,
-            theme.fg,
-            theme.bg,
-        );
-    }
-    digits::draw_colon(c, COLON_X, DIGIT_Y, DIGIT, theme.fg);
     gfx::text(
         c,
-        Font::Medium,
-        &date_line(env),
-        Point::new(127, 128),
-        Align::Center,
+        Font::Clock,
+        &time_text(env),
+        Point::new(14, 62),
+        Align::Left,
+        theme.fg,
+    );
+    let date = gfx::shorten(Font::Big, &date_line(env), DATE.size.width as i32 - 24);
+    gfx::text(
+        c,
+        Font::Big,
+        &date,
+        Point::new(18, 128),
+        Align::Left,
         if env.local.is_some() {
             theme.fg
         } else {
             theme.dim
         },
     );
-
     paint_weather(app, c, theme);
-    gfx::fill(c, DIVIDER, theme.panel);
+    gfx::fill(c, DIVIDER, theme.rule);
 
     for i in 0..ROWS {
-        let r = row_rect(i);
-        let y = r.center().y;
+        let y = ROW_Y + ROW_H * i as i32;
         match row(app, i) {
             Row::Item(item) => {
-                gfx::circle(c, Point::new(26, y), 14, theme.item(item.color));
-                let font = if item.text.chars().count() <= 26 {
-                    Font::Medium
-                } else {
-                    Font::Small
-                };
+                let color = theme.item(item.color);
+                match item.icon {
+                    Some(sym) => icons::symbol(c, sym, Point::new(22, y), 18, 2.2, color),
+                    None => gfx::circle(c, Point::new(22, y), 12, color),
+                }
+                let text = gfx::shorten(Font::Big, &item.text, ROW_TEXT_W);
                 gfx::text(
                     c,
-                    font,
-                    &item.text,
-                    Point::new(44, y),
+                    Font::Big,
+                    &text,
+                    Point::new(38, y),
                     Align::Left,
                     theme.fg,
                 );
                 gfx::text(
                     c,
-                    Font::Small,
+                    Font::Medium,
                     &right_text(item, env.now_ms),
-                    Point::new(464, y),
+                    Point::new(466, y),
                     Align::Right,
                     theme.dim,
                 );
             }
             Row::More(n) => gfx::text(
                 c,
-                Font::Small,
+                Font::Medium,
                 &format!("+{n} more"),
-                Point::new(44, y),
+                Point::new(38, y),
                 Align::Left,
                 theme.dim,
             ),
@@ -210,70 +194,43 @@ pub(crate) fn paint(app: &App, c: &mut Canvas<'_>, env: &Env, theme: &Theme) {
 }
 
 fn paint_weather(app: &App, c: &mut Canvas<'_>, theme: &Theme) {
-    let cx = WEATHER.center().x;
-    if !app.settings.has_location() {
+    let centered = |c: &mut Canvas<'_>, text: &str, y, color| {
         gfx::text(
             c,
-            Font::Small,
-            "No weather location",
-            Point::new(cx, 60),
+            Font::Body,
+            text,
+            Point::new(400, y),
             Align::Center,
-            theme.dim,
+            color,
         );
-        gfx::text(
-            c,
-            Font::Small,
-            "Set one on the web page",
-            Point::new(cx, 82),
-            Align::Center,
-            theme.dim,
-        );
-        return;
-    }
+    };
     let Some(w) = &app.weather else {
-        gfx::text(
-            c,
-            Font::Small,
-            &app.settings.location,
-            Point::new(cx, 60),
-            Align::Center,
-            theme.fg,
-        );
-        gfx::text(
-            c,
-            Font::Small,
-            "Loading weather...",
-            Point::new(cx, 82),
-            Align::Center,
-            theme.dim,
-        );
+        centered(c, "No weather yet", 60, theme.dim);
+        centered(c, "Comes in over MQTT", 82, theme.dim);
         return;
     };
-    icons::weather(c, ICON, 0.5, w.condition, w.is_day, theme, theme.bg);
+    icons::weather(
+        c,
+        Point::new(354, 46),
+        48,
+        w.condition,
+        w.is_day,
+        1.6,
+        theme.dim,
+    );
     gfx::text(
         c,
-        Font::Huge,
+        Font::Temp,
         &deg(w.temp_c),
-        Point::new(352, 58),
+        Point::new(386, 48),
         Align::Left,
         theme.fg,
     );
-    gfx::text(
+    centered(c, w.condition.label(), 98, theme.fg);
+    centered(
         c,
-        Font::Small,
-        w.condition.label(),
-        Point::new(cx, 106),
-        Align::Center,
-        theme.fg,
-    );
-    let place: String = app.settings.location.chars().take(14).collect();
-    let line = format!("{} / {}  \u{b7}  {place}", deg(w.min_c), deg(w.max_c));
-    gfx::text(
-        c,
-        Font::Small,
-        &line,
-        Point::new(cx, 128),
-        Align::Center,
+        &format!("{} / {}", deg(w.min_c), deg(w.max_c)),
+        122,
         theme.dim,
     );
 }

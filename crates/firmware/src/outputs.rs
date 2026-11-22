@@ -13,7 +13,7 @@ pub struct Backlight<'d> {
 }
 
 impl<'d> Backlight<'d> {
-    pub fn new(pwm: LedcDriver<'d>) -> Self {
+    pub const fn new(pwm: LedcDriver<'d>) -> Self {
         Self { pwm, percent: None }
     }
 
@@ -59,7 +59,7 @@ impl<'d> Speaker<'d> {
         })
     }
 
-    pub fn play(&mut self, beep: Beep, now_ms: u64) {
+    pub const fn play(&mut self, beep: Beep, now_ms: u64) {
         self.pattern = match beep {
             Beep::Notice => NOTICE,
         };
@@ -108,7 +108,7 @@ pub struct RgbLed<'d> {
 }
 
 impl<'d> RgbLed<'d> {
-    pub fn new(pins: [PinDriver<'d, Output>; 3]) -> Self {
+    pub const fn new(pins: [PinDriver<'d, Output>; 3]) -> Self {
         Self { pins, shown: None }
     }
 
@@ -116,8 +116,8 @@ impl<'d> RgbLed<'d> {
         if self.shown == Some(led) {
             return;
         }
-        let (r, g, b) = led.channels();
-        for (pin, lit) in self.pins.iter_mut().zip([r, g, b]) {
+        let channels: [bool; 3] = led.channels().into();
+        for (pin, lit) in self.pins.iter_mut().zip(channels) {
             let result = if lit { pin.set_low() } else { pin.set_high() };
             if let Err(e) = result {
                 log::warn!("led: {e}");

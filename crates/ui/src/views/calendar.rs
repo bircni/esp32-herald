@@ -2,21 +2,29 @@
 
 use embedded_graphics::{prelude::*, primitives::Rectangle};
 
-use super::{region, Region};
+use super::{
+    Region,
+    icons::{self, Symbol},
+    region,
+};
 use crate::{
     app::App,
     gfx::{self, Align, Canvas, Font},
-    model::{days_in_month, weekday_of, Env, LocalTime},
+    model::{Env, LocalTime, days_in_month, weekday_abbr, weekday_of},
     theme::Theme,
 };
 
 const AREA: Rectangle = gfx::rect(0, 0, 480, 304);
-const LEFT_X: i32 = 104;
-const GRID_X: i32 = 228;
-const COL_W: i32 = 35;
-const HEADER_Y: i32 = 26;
-const GRID_Y: i32 = 58;
-const ROW_H: i32 = 40;
+// The same layout as the calendar on the web app's mirror.
+const LEFT_X: i32 = 90;
+/// Centre of the sunrise and sunset icons.
+const SUN_X: i32 = 41;
+/// Centre of the first column of the month grid.
+const GRID_X: i32 = 214;
+const COL_W: i32 = 36;
+const HEADER_Y: i32 = 40;
+const GRID_Y: i32 = 72;
+const ROW_H: i32 = 38;
 
 fn daylight(app: &App) -> Option<((u8, u8), (u8, u8))> {
     let w = app.weather.as_ref()?;
@@ -48,57 +56,48 @@ pub(crate) fn paint(app: &App, c: &mut Canvas<'_>, env: &Env, theme: &Theme) {
     let left = |c: &mut Canvas<'_>, font, text: &str, y, color| {
         gfx::text(c, font, text, Point::new(LEFT_X, y), Align::Center, color);
     };
-    left(c, Font::Bold, t.weekday_name(), 34, theme.accent);
-    left(c, Font::Huge, &t.day.to_string(), 92, theme.fg);
+    left(c, Font::Big, weekday_abbr(t.weekday), 70, theme.dim);
+    left(c, Font::Day, &t.day.to_string(), 130, theme.fg);
     left(
         c,
         Font::Medium,
         &format!("{} {}", t.month_name(), t.year),
-        146,
+        192,
         theme.fg,
     );
-    left(
-        c,
-        Font::Small,
-        &format!("Week {}  \u{b7}  day {}", t.iso_week(), t.day_of_year()),
-        174,
-        theme.dim,
-    );
     if let Some(((rh, rm), (sh, sm))) = daylight(app) {
-        let minutes = (i32::from(sh) * 60 + i32::from(sm)) - (i32::from(rh) * 60 + i32::from(rm));
-        left(
-            c,
-            Font::Small,
-            &format!("Sunrise  {rh:02}:{rm:02}"),
-            222,
-            theme.fg,
-        );
-        left(
-            c,
-            Font::Small,
-            &format!("Sunset  {sh:02}:{sm:02}"),
-            246,
-            theme.fg,
-        );
-        if minutes > 0 {
-            left(
+        let line = |c: &mut Canvas<'_>, sym, color, text: &str, y| {
+            icons::symbol(c, sym, Point::new(SUN_X, y), 22, 2.0, color);
+            gfx::text(
                 c,
-                Font::Small,
-                &format!("{}h {:02}m of daylight", minutes / 60, minutes % 60),
-                270,
-                theme.dim,
+                Font::Body,
+                text,
+                Point::new(SUN_X + 19, y),
+                Align::Left,
+                theme.fg,
             );
-        }
+        };
+        line(
+            c,
+            Symbol::Sun,
+            theme.caution,
+            &format!("{rh:02}:{rm:02}"),
+            237,
+        );
+        line(c, Symbol::Moon, theme.dim, &format!("{sh:02}:{sm:02}"), 267);
     }
-    paint_month(c, &t, theme);
+    paint_month(c, t, theme);
 }
 
-fn paint_month(c: &mut Canvas<'_>, t: &LocalTime, theme: &Theme) {
-    let col = |i: i32| GRID_X + COL_W * i + COL_W / 2;
-    for (i, name) in ["M", "T", "W", "T", "F", "S", "S"].into_iter().enumerate() {
+fn paint_month(c: &mut Canvas<'_>, t: LocalTime, theme: &Theme) {
+    let col = |i: i32| GRID_X + COL_W * i;
+    for (i, name) in ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"]
+        .into_iter()
+        .enumerate()
+    {
         gfx::text(
             c,
-            Font::Small,
+            Font::Body,
             name,
             Point::new(col(i as i32), HEADER_Y),
             Align::Center,
@@ -111,13 +110,13 @@ fn paint_month(c: &mut Canvas<'_>, t: &LocalTime, theme: &Theme) {
         let (column, row) = (cell % 7, cell / 7);
         let at = Point::new(col(column), GRID_Y + ROW_H * row);
         let color = if day == i32::from(t.day) {
-            gfx::circle(c, at, 32, theme.accent);
+            gfx::circle(c, at, 30, theme.accent);
             theme.on_accent
         } else if column >= 5 {
             theme.dim
         } else {
             theme.fg
         };
-        gfx::text(c, Font::Medium, &day.to_string(), at, Align::Center, color);
+        gfx::text(c, Font::Body, &day.to_string(), at, Align::Center, color);
     }
 }

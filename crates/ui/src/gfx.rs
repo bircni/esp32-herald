@@ -13,9 +13,8 @@ use embedded_graphics::{
     primitives::{Arc, Circle, Line, PrimitiveStyle, Rectangle, RoundedRectangle, Triangle},
 };
 use u8g2_fonts::{
-    fonts,
+    FontRenderer, fonts,
     types::{FontColor, HorizontalAlignment, VerticalPosition},
-    FontRenderer,
 };
 
 use crate::model::screen;
@@ -27,6 +26,17 @@ pub const BAND_PIXELS: usize = 16_000;
 pub struct Canvas<'a> {
     buf: &'a mut [Rgb565],
     area: Rectangle,
+}
+
+impl<'a> Canvas<'a> {
+    /// A canvas for `area`; `buf` must hold at least its pixels.
+    pub fn new(buf: &'a mut [Rgb565], area: Rectangle) -> Self {
+        let n = area.size.width as usize * area.size.height as usize;
+        Self {
+            buf: &mut buf[..n],
+            area,
+        }
+    }
 }
 
 impl Dimensions for Canvas<'_> {
@@ -73,6 +83,9 @@ impl DrawTarget for Canvas<'_> {
 /// Renders `rect` by calling `paint` once per band and pushing each band to
 /// the display. `paint` draws in screen coordinates and must fill the
 /// background itself; everything outside the band is clipped.
+///
+/// # Errors
+/// When the display fails.
 pub fn render<D>(
     display: &mut D,
     buf: &mut [Rgb565],
@@ -102,6 +115,7 @@ where
     Ok(())
 }
 
+#[must_use]
 pub const fn rect(x: i32, y: i32, w: u32, h: u32) -> Rectangle {
     Rectangle::new(Point::new(x, y), Size::new(w, h))
 }
@@ -172,12 +186,28 @@ pub fn arc(
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// Fonts matched to the web app's sizes (CSS px in brackets).
 pub enum Font {
+    /// Helvetica 12 (13 px): labels, secondary text.
     Small,
+    /// Helvetica 14 (15-16 px).
+    Body,
+    /// Helvetica 18 (18 px).
     Medium,
+    /// Helvetica 24 (22-26 px).
+    Big,
+    /// Helvetica bold 18 (20 px headings).
     Bold,
+    /// Helvetica bold 24.
     Large,
+    /// Logisoso 30, numbers and text (42 px temperature).
+    Temp,
+    /// Logisoso 50, numbers and text.
     Huge,
+    /// Logisoso 62, digits only (88 px calendar day).
+    Day,
+    /// Logisoso 78, digits only (96 px clock).
+    Clock,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -188,14 +218,61 @@ pub enum Align {
 }
 
 /// Draws one line of text. `pos.y` is the vertical centre of the line.
-pub fn text(c: &mut Canvas<'_>, font: Font, s: &str, pos: Point, align: Align, color: Rgb565) {
-    let renderer = match font {
+const fn renderer(font: Font) -> FontRenderer {
+    match font {
         Font::Small => FontRenderer::new::<fonts::u8g2_font_helvR12_tf>(),
+        Font::Body => FontRenderer::new::<fonts::u8g2_font_helvR14_tf>(),
         Font::Medium => FontRenderer::new::<fonts::u8g2_font_helvR18_tf>(),
+        Font::Big => FontRenderer::new::<fonts::u8g2_font_helvR24_tf>(),
         Font::Bold => FontRenderer::new::<fonts::u8g2_font_helvB18_tf>(),
         Font::Large => FontRenderer::new::<fonts::u8g2_font_helvB24_tf>(),
+        Font::Temp => FontRenderer::new::<fonts::u8g2_font_logisoso30_tf>(),
         Font::Huge => FontRenderer::new::<fonts::u8g2_font_logisoso50_tf>(),
-    };
+        Font::Day => FontRenderer::new::<fonts::u8g2_font_logisoso62_tn>(),
+        Font::Clock => FontRenderer::new::<fonts::u8g2_font_logisoso78_tn>(),
+    }
+}
+
+/// Width of `s` in pixels when drawn with `font`.
+#[must_use]
+pub fn text_width(font: Font, s: &str) -> i32 {
+    renderer(font)
+        .get_rendered_dimensions(s, Point::zero(), VerticalPosition::Center)
+        .ok()
+        .and_then(|d| d.bounding_box)
+        .map_or(0, |b| b.size.width as i32)
+}
+
+/// The largest of `fonts` (given largest first) in which `s` fits `width`.
+#[must_use]
+pub fn fitting_font(fonts: &[Font], s: &str, width: i32) -> Font {
+    fonts
+        .iter()
+        .copied()
+        .find(|f| text_width(*f, s) <= width)
+        .or_else(|| fonts.last().copied())
+        .unwrap_or(Font::Small)
+}
+
+/// `text`, cut with ".." until it fits `width`.
+#[must_use]
+pub fn shorten(font: Font, text: &str, width: i32) -> String {
+    if text_width(font, text) <= width {
+        return text.to_owned();
+    }
+    let mut chars: Vec<char> = text.chars().collect();
+    while !chars.is_empty() {
+        chars.pop();
+        let candidate = format!("{}..", chars.iter().collect::<String>().trim_end());
+        if text_width(font, &candidate) <= width {
+            return candidate;
+        }
+    }
+    String::new()
+}
+
+pub fn text(c: &mut Canvas<'_>, font: Font, s: &str, pos: Point, align: Align, color: Rgb565) {
+    let renderer = renderer(font);
     let align = match align {
         Align::Left => HorizontalAlignment::Left,
         Align::Center => HorizontalAlignment::Center,
@@ -220,6 +297,7 @@ pub fn button(c: &mut Canvas<'_>, r: Rectangle, label: &str, bg: Rgb565, fg: Rgb
 }
 
 /// Stable 64-bit key for change detection of a screen region.
+#[must_use]
 pub fn key(parts: &[i64]) -> u64 {
     // FNV-1a
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
@@ -232,6 +310,7 @@ pub fn key(parts: &[i64]) -> u64 {
     h
 }
 
+#[must_use]
 pub fn str_key(s: &str) -> i64 {
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
     for b in s.bytes() {

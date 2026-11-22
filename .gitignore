@@ -4,3 +4,4 @@ sim-settings.json
 sim-calibration.json
 screenshots/
 .DS_Store
+.playwright-mcp/

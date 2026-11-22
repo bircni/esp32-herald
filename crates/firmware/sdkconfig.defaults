@@ -4,16 +4,33 @@ CONFIG_ESP_SYSTEM_EVENT_TASK_STACK_SIZE=4096
 CONFIG_FREERTOS_IDLE_TASK_STACKSIZE=4096
 CONFIG_PTHREAD_TASK_STACK_SIZE_DEFAULT=8192
 
+# Full speed; the board runs on USB power.
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+
 # 1 ms tick so short sleeps in the UI loop are accurate.
 CONFIG_FREERTOS_HZ=1000
 
 # 4 MB module, no OTA: one large application partition (see partitions.csv).
 CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
 
-# No PSRAM on this board: keep the WiFi stack's RAM use modest.
-CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=6
-CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=12
-CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM=12
-CONFIG_ESP_WIFI_AMPDU_RX_ENABLED=n
-CONFIG_ESP_WIFI_AMPDU_TX_ENABLED=n
+# WiFi buffers and A-MPDU stay at ESP-IDF's defaults. Cutting them to save
+# RAM made access points (seen with WPA3) queue frames for seconds: pings of
+# 4-6 s and about 1.5 KB/s at full signal.
 CONFIG_BT_ENABLED=n
+
+# Updates over WiFi: a new firmware must connect once and mark itself valid,
+# otherwise the bootloader goes back to the previous one.
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+
+# The UI loop runs on the main task; put it on the second core, away from
+# WiFi and the TCP/IP stack on core 0.
+CONFIG_ESP_MAIN_TASK_AFFINITY_CPU1=y
+
+# Smaller firmware (measured: 1.61 MB -> 1.51 MB). Error names stay in the
+# log (about 8 KB) as they make debugging much easier.
+# C printf without float formatting; Rust formatting is unaffected.
+CONFIG_NEWLIB_NANO_FORMAT=y
+# ESP-IDF assertions still stop the device, without their message strings.
+CONFIG_COMPILER_OPTIMIZATION_ASSERTIONS_SILENT=y
+# IPv4 only; mDNS and the home network work without IPv6.
+CONFIG_LWIP_IPV6=n
