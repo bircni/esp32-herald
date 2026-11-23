@@ -43,7 +43,8 @@ device serves are at <http://127.0.0.1:8080>.
   `--calibrate` starts with touch calibration, `--setup` in WiFi setup mode,
   `--headless` runs without a window, `--port N` picks the port,
   `--screenshots DIR` renders every screen to PNG.
-- `--epaper` shows the e-paper board instead: arrow keys are the rotary
+- `--board crowpanel-579` simulates the e-paper board instead (default
+  `freenove-35`, names as in `ui::Profile`): arrow keys are the rotary
   switch, Enter presses it, Escape is EXIT and M is MENU.
 
 ## Build and flash the firmware

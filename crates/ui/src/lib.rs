@@ -15,6 +15,7 @@ pub mod gfx;
 pub mod logbuf;
 pub mod model;
 pub mod mqtt;
+pub mod profile;
 pub mod screen;
 pub mod theme;
 pub mod vector;
@@ -24,8 +25,8 @@ pub mod weather;
 pub use app::App;
 pub use feed::Item;
 pub use model::{
-    Beep, Calibration, Effect, Env, ItemColor, Led, LocalTime, NetState, RawTouch, SCREEN_H,
-    SCREEN_W, Settings, ViewId,
+    Beep, Calibration, Effect, Env, ItemColor, Led, LocalTime, NetState, RawTouch, Settings, ViewId,
 };
+pub use profile::Profile;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

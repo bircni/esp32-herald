@@ -260,7 +260,11 @@ mod tests {
     };
 
     fn app() -> App {
-        App::new(Settings::default(), Some(Calibration::identity()))
+        App::new(
+            crate::Profile::FREENOVE_35,
+            Settings::default(),
+            Some(Calibration::identity(480, 320)),
+        )
     }
 
     fn send(app: &mut App, now_ms: u64, topic: &str, payload: &str) -> Result<Reply, Rejection> {

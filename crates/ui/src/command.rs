@@ -248,6 +248,11 @@ pub fn execute(app: &mut App, env: &Env, command: Command) -> Result<Reply, Reje
             ok()
         }
         Command::Touch(gesture) => {
+            if let Gesture::Tap(p) | Gesture::LongPress(p) = gesture
+                && !app.profile().area().contains(p)
+            {
+                return Err(reject(400, "x/y must lie on the screen"));
+            }
             app.remote_gesture(gesture, env);
             ok()
         }
@@ -474,9 +479,11 @@ pub fn state(app: &App, env: &Env) -> Value {
         "heap_free": env.heap_free,
         "firmware": { "slot": env.firmware_slot, "ota": env.firmware_slot.is_some() },
         "screens_rev": app.screens().rev().to_string(),
-        // E-paper boards: the web app shows /api/frame.bmp instead of
-        // drawing the screen itself.
-        "epaper": app.shown_frame.as_ref().map(|(rev, _)| rev.to_string()),
+        // What the board can do; the web app shows only what applies.
+        "device": app.profile(),
+        // Boards that keep their picture: the web app shows /api/frame.bmp
+        // (changes with this) instead of drawing the screen itself.
+        "frame": app.shown_frame.as_ref().map(|(rev, _)| rev.to_string()),
         "items": items_json(app, env),
         "weather": app.weather().map(|w| json!({
             "temp_c": round1(w.temp_c),
@@ -505,7 +512,11 @@ mod tests {
     use crate::model::Calibration;
 
     fn app() -> App {
-        App::new(Settings::default(), Some(Calibration::identity()))
+        App::new(
+            crate::Profile::FREENOVE_35,
+            Settings::default(),
+            Some(Calibration::identity(480, 320)),
+        )
     }
 
     fn item(json: &str) -> ItemBody {
@@ -521,6 +532,28 @@ mod tests {
                 item: item(json),
             },
         )
+    }
+
+    #[test]
+    fn state_reports_the_board() {
+        let env = Env::default();
+        let s = state(&app(), &env);
+        assert_eq!(s["device"]["name"], "freenove-35");
+        assert_eq!(s["device"]["touch"], true);
+        assert!(s["frame"].is_null(), "the TFT keeps no frame");
+
+        let mut paper = App::new(crate::Profile::CROWPANEL_579, Settings::default(), None);
+        let s = state(&paper, &env);
+        assert_eq!(
+            (
+                s["device"]["width"].as_i64(),
+                s["device"]["backlight"].as_bool()
+            ),
+            (Some(272), Some(false))
+        );
+        let frame = crate::epaper::Renderer::new(50).render(&paper, &env);
+        paper.set_shown_frame(frame);
+        assert_eq!(state(&paper, &env)["frame"], "1");
     }
 
     #[test]

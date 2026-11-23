@@ -15,7 +15,7 @@ use crate::{
     },
     gesture::{Dir, Gesture},
     gfx,
-    model::{Env, NetState, screen},
+    model::{Env, NetState},
 };
 
 /// Bodies larger than this are rejected. Transports should not read more,
@@ -204,9 +204,6 @@ impl Transport for Http {
             ("DELETE", "/api/weather") => Ok(Command::SetWeather(None)),
             ("POST", "/api/tap") => {
                 let req: TapRequest = parse_json(req.body)?;
-                if !screen().contains(Point::new(req.x, req.y)) {
-                    return Err(reject(400, "x/y must lie on the screen"));
-                }
                 let p = Point::new(req.x, req.y);
                 Ok(Command::Touch(if req.long {
                     Gesture::LongPress(p)
@@ -378,7 +375,11 @@ mod tests {
     };
 
     fn app() -> App {
-        App::new(Settings::default(), Some(Calibration::identity()))
+        App::new(
+            crate::Profile::FREENOVE_35,
+            Settings::default(),
+            Some(Calibration::identity(480, 320)),
+        )
     }
 
     fn env(now_ms: u64) -> Env {

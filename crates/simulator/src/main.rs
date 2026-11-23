@@ -7,11 +7,11 @@
 //! cargo run -p simulator -- --setup           # start in WiFi setup mode
 //! cargo run -p simulator -- --demo            # sample feed items and weather
 //! cargo run -p simulator -- --screenshots DIR # render every screen to PNG, no window
-//! cargo run -p simulator -- --epaper          # the tall e-paper board instead
+//! cargo run -p simulator -- --board crowpanel-579  # another board (default freenove-35)
 //! ```
 //!
-//! With `--epaper` the arrow keys are the rotary switch, Enter presses it,
-//! Escape is the EXIT button and M the MENU button.
+//! Boards without touch use the keyboard: the arrow keys are the rotary
+//! switch, Enter presses it, Escape is the EXIT button and M the MENU button.
 
 use std::{
     fs,
@@ -32,8 +32,7 @@ use embedded_graphics_simulator::{
     sdl2::{Keycode, MouseButton},
 };
 use ui::{
-    App, Calibration, Effect, Env, Led, LocalTime, NetState, RawTouch, SCREEN_H, SCREEN_W,
-    Settings, api,
+    App, Calibration, Effect, Env, Led, LocalTime, NetState, Profile, RawTouch, Settings, api,
     epaper::{self, Button, Refresh, Refresher, Renderer},
 };
 
@@ -165,8 +164,8 @@ struct Args {
     demo: bool,
     /// No window: the app runs and draws off-screen, for tests.
     headless: bool,
-    /// The e-paper board's tall black-and-white layout.
-    epaper: bool,
+    /// The board to simulate.
+    board: Profile,
     port: u16,
     screenshots: Option<PathBuf>,
 }
@@ -177,7 +176,7 @@ fn parse_args() -> Result<Args, String> {
         setup: false,
         demo: false,
         headless: false,
-        epaper: false,
+        board: Profile::FREENOVE_35,
         port: 8080,
         screenshots: None,
     };
@@ -188,7 +187,13 @@ fn parse_args() -> Result<Args, String> {
             "--setup" => args.setup = true,
             "--demo" => args.demo = true,
             "--headless" => args.headless = true,
-            "--epaper" => args.epaper = true,
+            "--board" => {
+                let value = it.next().ok_or("--board needs a name")?;
+                args.board = Profile::by_name(&value).ok_or_else(|| {
+                    let names: Vec<_> = Profile::ALL.iter().map(|p| p.name).collect();
+                    format!("unknown board {value}; known: {}", names.join(", "))
+                })?;
+            }
             "--port" => {
                 let value = it.next().ok_or("--port needs a number")?;
                 args.port = value.parse().map_err(|_| format!("bad port: {value}"))?;
@@ -207,7 +212,7 @@ fn main() {
         Ok(a) => a,
         Err(e) => {
             eprintln!(
-                "{e}\nusage: simulator [--calibrate] [--setup] [--demo] [--headless] [--epaper] [--port N] [--screenshots DIR]"
+                "{e}\nusage: simulator [--calibrate] [--setup] [--demo] [--headless] [--board NAME] [--port N] [--screenshots DIR]"
             );
             std::process::exit(2);
         }
@@ -228,9 +233,10 @@ fn main() {
         .filter(|s: &Settings| s.validate().is_ok())
         .unwrap_or_default();
     // The mouse already reports screen coordinates.
-    let calibration = (!args.calibrate).then(Calibration::identity);
+    let board = args.board;
+    let calibration = (!args.calibrate).then(|| Calibration::identity(board.width, board.height));
     let shared = Arc::new(Shared {
-        app: Mutex::new(App::new(settings, calibration)),
+        app: Mutex::new(App::new(board, settings, calibration)),
         net: Mutex::new(if args.setup {
             setup_net()
         } else {
@@ -253,8 +259,8 @@ fn main() {
     run_mqtt(Arc::clone(&shared));
     if args.headless {
         run_headless(&shared);
-    } else if args.epaper {
-        run_epaper(&shared);
+    } else if board.frame {
+        run_frame(&shared);
     } else {
         run_window(&shared, args.calibrate);
     }
@@ -322,7 +328,8 @@ fn output_settings() -> OutputSettings {
 /// values look like those of a real resistive panel (a different scale and
 /// offset per axis), so the calibration screen has real work to do.
 fn to_raw(p: Point, fake_adc: bool) -> RawTouch {
-    let (x, y) = (p.x.clamp(0, SCREEN_W - 1), p.y.clamp(0, SCREEN_H - 1));
+    let size = Profile::FREENOVE_35;
+    let (x, y) = (p.x.clamp(0, size.width - 1), p.y.clamp(0, size.height - 1));
     if fake_adc {
         RawTouch {
             x: (x * 11 + 250) as u16,
@@ -338,7 +345,7 @@ fn to_raw(p: Point, fake_adc: bool) -> RawTouch {
 
 /// The app loop without a window: ticks and draws off-screen.
 fn run_headless(shared: &Shared) {
-    let mut display = SimulatorDisplay::<Rgb565>::new(Size::new(SCREEN_W as u32, SCREEN_H as u32));
+    let mut display = SimulatorDisplay::<Rgb565>::new(ui::views::area().size);
     loop {
         let env = shared.env();
         {
@@ -356,7 +363,7 @@ fn run_headless(shared: &Shared) {
     reason = "of the window events only the left mouse button and quitting matter"
 )]
 fn run_window(shared: &Shared, fake_adc: bool) {
-    let size = Size::new(SCREEN_W as u32, SCREEN_H as u32);
+    let size = ui::views::area().size;
     let mut display = SimulatorDisplay::<Rgb565>::new(size);
     let dark = SimulatorDisplay::<Rgb565>::new(size);
     let mut window = Window::new("Herald simulator", &output_settings());
@@ -407,7 +414,7 @@ fn run_window(shared: &Shared, fake_adc: bool) {
     clippy::wildcard_enum_match_arm,
     reason = "of the window events only a few keys and quitting matter"
 )]
-fn run_epaper(shared: &Shared) {
+fn run_frame(shared: &Shared) {
     let mut display =
         SimulatorDisplay::<Rgb565>::new(Size::new(epaper::W as u32, epaper::H as u32));
     let mut window = Window::new("Herald e-paper", &output_settings());
@@ -752,7 +759,12 @@ const DEMO_SCREENS: [(&str, &str); 2] = [
 const SAMPLE_WEATHER: &str = r#"{"temp":6.4,"condition":"cloudy","is_day":false,"sunrise":"07:38","sunset":"16:05","hourly":[{"hour":17,"temp":6.4,"rain":23,"condition":"cloudy","is_day":false},{"hour":18,"temp":6.2,"rain":40,"condition":"cloudy","is_day":false},{"hour":19,"temp":5.9,"rain":35,"condition":"rainy","is_day":false},{"hour":20,"temp":5.7,"rain":18,"condition":"rainy","is_day":false},{"hour":21,"temp":5.5,"rain":13,"condition":"rainy","is_day":false},{"hour":22,"temp":5.3,"rain":10,"condition":"cloudy","is_day":false},{"hour":23,"temp":5.2,"rain":20,"condition":"cloudy","is_day":false},{"hour":0,"temp":4.9,"rain":33,"condition":"cloudy","is_day":false},{"hour":1,"temp":4.8,"rain":45,"condition":"rainy","is_day":false},{"hour":2,"temp":4.8,"rain":45,"condition":"rainy","is_day":false},{"hour":3,"temp":4.7,"rain":28,"condition":"cloudy","is_day":false},{"hour":4,"temp":4.5,"rain":13,"condition":"partlycloudy","is_day":false}],"daily":[{"date":"2026-11-21","min":0.6,"max":6.7,"condition":"rainy"},{"date":"2026-11-22","min":2.1,"max":4.9,"condition":"rainy"},{"date":"2026-11-23","min":-0.6,"max":3.0,"condition":"snowy"},{"date":"2026-11-24","min":-1.0,"max":1.7,"condition":"cloudy"}]}"#;
 
 /// The e-paper layout: the dashboard, custom screens and setup.
-fn epaper_screenshots(dir: &Path, app: &mut App, env: &mut Env) -> Result<usize, String> {
+fn epaper_screenshots(dir: &Path, env: &mut Env) -> Result<usize, String> {
+    let settings = Settings {
+        theme: ui::model::ThemeKind::Light,
+        ..Settings::default()
+    };
+    let app = &mut App::new(Profile::CROWPANEL_579, settings, None);
     let mut display =
         SimulatorDisplay::<Rgb565>::new(Size::new(epaper::W as u32, epaper::H as u32));
     let mut renderer = Renderer::new(epaper::H as usize);
@@ -812,8 +824,8 @@ fn run(app: &mut App, env: &mut Env, ms: u64, touch: Option<(i32, i32)>) {
 )]
 fn screenshots(dir: &Path) -> Result<(), String> {
     fs::create_dir_all(dir).map_err(|e| e.to_string())?;
-    let mut display = SimulatorDisplay::<Rgb565>::new(Size::new(SCREEN_W as u32, SCREEN_H as u32));
-    let mut app = App::new(Settings::default(), None);
+    let mut display = SimulatorDisplay::<Rgb565>::new(ui::views::area().size);
+    let mut app = App::new(Profile::FREENOVE_35, Settings::default(), None);
     let mut env = Env {
         now_ms: 0,
         local: Some(LocalTime {
@@ -934,7 +946,7 @@ fn screenshots(dir: &Path) -> Result<(), String> {
     run(&mut app, &mut env, 60, None);
     shot(&mut app, &env, "wifi-setup")?;
 
-    count += epaper_screenshots(dir, &mut app, &mut env)?;
+    count += epaper_screenshots(dir, &mut env)?;
 
     println!("{count} screenshots written to {}", dir.display());
     Ok(())

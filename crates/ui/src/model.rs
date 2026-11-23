@@ -3,17 +3,6 @@
 use embedded_graphics::{pixelcolor::Rgb565, prelude::*};
 use serde::{Deserialize, Serialize};
 
-pub const SCREEN_W: i32 = 480;
-pub const SCREEN_H: i32 = 320;
-
-#[must_use]
-pub const fn screen() -> embedded_graphics::primitives::Rectangle {
-    embedded_graphics::primitives::Rectangle::new(
-        Point::new(0, 0),
-        Size::new(SCREEN_W as u32, SCREEN_H as u32),
-    )
-}
-
 /// A view: one of the built-in ones, or a custom screen by its slot in
 /// [`crate::screen::Screens`]. Names are resolved by the app, as custom
 /// screens come and go.
@@ -387,22 +376,24 @@ pub struct Calibration {
 }
 
 impl Calibration {
-    /// Raw values already are screen coordinates (used by the simulator).
+    /// Raw values already are screen coordinates, on a screen of `width`
+    /// by `height` (used by the simulator and boards without touch).
     #[must_use]
-    pub const fn identity() -> Self {
+    pub const fn identity(width: i32, height: i32) -> Self {
         Self {
             swap_xy: false,
             ax: 1.0,
             bx: 0.0,
             ay: 1.0,
             by: 0.0,
-            screen: (SCREEN_W, SCREEN_H),
+            screen: (width, height),
         }
     }
 
+    /// Whether the calibration was made for a screen of this size.
     #[must_use]
-    pub fn fits_screen(&self) -> bool {
-        self.screen == (SCREEN_W, SCREEN_H)
+    pub fn fits(&self, width: i32, height: i32) -> bool {
+        self.screen == (width, height)
     }
 
     #[must_use]
@@ -414,13 +405,18 @@ impl Calibration {
         };
         let x = (self.ax * f32::from(rx) + self.bx).round() as i32;
         let y = (self.ay * f32::from(ry) + self.by).round() as i32;
-        Point::new(x.clamp(0, SCREEN_W - 1), y.clamp(0, SCREEN_H - 1))
+        let (w, h) = self.screen;
+        Point::new(x.clamp(0, w - 1), y.clamp(0, h - 1))
     }
 
     /// Derives a calibration from the four corner targets, given in the order
-    /// top-left, top-right, bottom-right, bottom-left.
+    /// top-left, top-right, bottom-right, bottom-left, on a screen of `size`.
     #[must_use]
-    pub fn from_corners(targets: &[Point; 4], raw: &[RawTouch; 4]) -> Option<Self> {
+    pub fn from_corners(
+        targets: &[Point; 4],
+        raw: &[RawTouch; 4],
+        size: (i32, i32),
+    ) -> Option<Self> {
         let f = |v: u16| f32::from(v);
         // Does the raw X axis follow the screen X axis, or the screen Y axis?
         let dx_along_x = (f(raw[1].x) - f(raw[0].x)).abs() + (f(raw[2].x) - f(raw[3].x)).abs();
@@ -453,7 +449,7 @@ impl Calibration {
             bx: sx0 - ax * left,
             ay,
             by: sy0 - ay * top,
-            screen: (SCREEN_W, SCREEN_H),
+            screen: size,
         })
     }
 }
@@ -706,7 +702,7 @@ mod tests {
             x: (p.x * 10 + 200) as u16,
             y: (p.y * 8 + 100) as u16,
         });
-        let c = Calibration::from_corners(&TARGETS, &raw).unwrap();
+        let c = Calibration::from_corners(&TARGETS, &raw, (480, 320)).unwrap();
         assert!(!c.swap_xy);
         assert_eq!(c.map(RawTouch { x: 2600, y: 1380 }), Point::new(240, 160));
     }
@@ -718,7 +714,7 @@ mod tests {
             x: (p.y * 10 + 300) as u16,
             y: (4000 - p.x * 8) as u16,
         });
-        let c = Calibration::from_corners(&TARGETS, &raw).unwrap();
+        let c = Calibration::from_corners(&TARGETS, &raw, (480, 320)).unwrap();
         assert!(c.swap_xy);
         let p = c.map(RawTouch {
             x: (160 * 10 + 300) as u16,
@@ -730,7 +726,7 @@ mod tests {
     #[test]
     fn calibration_rejects_degenerate_taps() {
         let raw = [RawTouch { x: 2000, y: 2000 }; 4];
-        assert_eq!(Calibration::from_corners(&TARGETS, &raw), None);
+        assert_eq!(Calibration::from_corners(&TARGETS, &raw, (480, 320)), None);
     }
 
     #[test]
@@ -741,7 +737,7 @@ mod tests {
             bx: -22.5,
             ay: -0.1431,
             by: 512.0,
-            screen: (SCREEN_W, SCREEN_H),
+            screen: (480, 320),
         };
         let json = serde_json::to_string(&c).unwrap();
         assert_eq!(serde_json::from_str::<Calibration>(&json).unwrap(), c);
@@ -750,20 +746,20 @@ mod tests {
             r#"{"swap_xy":false,"ax":1,"bx":0,"ay":1,"by":0,"screen":[480,320]}"#,
         )
         .unwrap();
-        assert_eq!(c, Calibration::identity());
+        assert_eq!(c, Calibration::identity(480, 320));
     }
 
     #[test]
     fn calibration_from_the_portrait_layout_does_not_fit() {
         let old: Calibration =
             serde_json::from_str(r#"{"swap_xy":true,"ax":0.1,"bx":0,"ay":0.1,"by":0}"#).unwrap();
-        assert!(!old.fits_screen());
-        assert!(Calibration::identity().fits_screen());
+        assert!(!old.fits(480, 320));
+        assert!(Calibration::identity(480, 320).fits(480, 320));
     }
 
     #[test]
     fn calibration_clamps_to_screen() {
-        let c = Calibration::identity();
+        let c = Calibration::identity(480, 320);
         assert_eq!(c.map(RawTouch { x: 4000, y: 4000 }), Point::new(479, 319));
     }
 

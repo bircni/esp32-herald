@@ -135,7 +135,7 @@ fn live_key(app: &App, w: &Widget, env: &Env) -> i64 {
 
 pub(crate) fn regions(app: &App, slot: u8, env: &Env) -> Vec<Region> {
     let Some(entry) = app.screens.get(slot) else {
-        return vec![region(crate::model::screen(), &[-1])];
+        return vec![region(super::area(), &[-1])];
     };
     let titled = !entry.screen.title.is_empty();
     let theme_key = app.theme().key();

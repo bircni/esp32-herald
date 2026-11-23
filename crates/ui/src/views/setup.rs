@@ -6,7 +6,7 @@ use super::{Region, region};
 use crate::{
     app::App,
     gfx::{self, Align, Canvas, Font},
-    model::{Calibration, Env, NetState, RawTouch, screen},
+    model::{Calibration, Env, NetState, RawTouch},
     theme::Theme,
 };
 
@@ -70,7 +70,7 @@ impl CalibrateState {
                 if self.step < TARGETS.len() {
                     return None;
                 }
-                let result = Calibration::from_corners(&TARGETS, &self.raw);
+                let result = Calibration::from_corners(&TARGETS, &self.raw, (super::W, super::H));
                 self.step = 0;
                 self.failed = result.is_none();
                 result
@@ -84,7 +84,7 @@ pub(crate) fn calibrate_regions(app: &App) -> Vec<Region> {
         .calibrate
         .as_ref()
         .map_or((0, false), |s| (s.step as i64, s.failed));
-    vec![region(screen(), &[step, i64::from(failed)])]
+    vec![region(super::area(), &[step, i64::from(failed)])]
 }
 
 pub(crate) fn paint_calibrate(app: &App, c: &mut Canvas<'_>, theme: &Theme) {
@@ -142,7 +142,7 @@ pub(crate) fn wifi_regions(env: &Env) -> Vec<Region> {
         }
         NetState::Offline | NetState::Connecting { .. } | NetState::Connected { .. } => 0,
     };
-    vec![region(screen(), &[key])]
+    vec![region(super::area(), &[key])]
 }
 
 pub(crate) fn paint_wifi(c: &mut Canvas<'_>, env: &Env, theme: &Theme) {

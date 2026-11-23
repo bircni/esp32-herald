@@ -6,7 +6,10 @@
 use std::convert::Infallible;
 
 use embedded_graphics::{pixelcolor::Rgb565, prelude::*};
-use ui::{App, Env, LocalTime, NetState, RawTouch, SCREEN_H, SCREEN_W, Settings, ViewId, api};
+use ui::{App, Env, LocalTime, NetState, RawTouch, Settings, ViewId, api};
+
+const SCREEN_W: i32 = ui::Profile::FREENOVE_35.width;
+const SCREEN_H: i32 = ui::Profile::FREENOVE_35.height;
 
 #[derive(Clone, PartialEq)]
 struct Frame(Vec<Rgb565>);
@@ -62,7 +65,7 @@ struct Rig {
 impl Rig {
     fn new() -> Self {
         Self {
-            app: App::new(Settings::default(), None),
+            app: App::new(ui::Profile::FREENOVE_35, Settings::default(), None),
             env: Env {
                 now_ms: 0,
                 local: Some(LocalTime {

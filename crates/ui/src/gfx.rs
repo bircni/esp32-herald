@@ -17,8 +17,6 @@ use u8g2_fonts::{
     types::{FontColor, HorizontalAlignment, VerticalPosition},
 };
 
-use crate::model::screen;
-
 /// Number of pixels in the band buffer (2 bytes each).
 pub const BAND_PIXELS: usize = 16_000;
 
@@ -95,7 +93,7 @@ pub fn render<D>(
 where
     D: DrawTarget<Color = Rgb565>,
 {
-    let rect = rect.intersection(&screen());
+    let rect = rect.intersection(&display.bounding_box());
     if rect.is_zero_sized() {
         return Ok(());
     }
@@ -361,7 +359,7 @@ mod tests {
         let mut buf = vec![Rgb565::BLACK; 250];
         let region = rect(10, 20, 100, 5);
         render(&mut d, &mut buf, region, |c| {
-            fill(c, screen(), Rgb565::RED);
+            fill(c, rect(0, 0, 320, 480), Rgb565::RED);
             // Partly outside the region: must be clipped, not panic.
             fill(c, rect(100, 22, 50, 50), Rgb565::GREEN);
         })

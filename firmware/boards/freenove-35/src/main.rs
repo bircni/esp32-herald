@@ -26,7 +26,7 @@ use mipidsi::{
     models::ST7796,
     options::{ColorInversion, ColorOrder, Orientation},
 };
-use ui::{App, Env};
+use ui::{App, Env, Profile};
 
 use crate::{
     outputs::{Backlight, RgbLed, Speaker},
@@ -148,7 +148,10 @@ where
     /// Also the touch sampling interval the gesture code expects.
     const TICK: Duration = Duration::from_millis(30);
     // QEMU has neither a touch panel nor a WiFi radio.
-    const TOUCH: bool = !cfg!(feature = "qemu");
+    const PROFILE: Profile = Profile {
+        touch: !cfg!(feature = "qemu"),
+        ..Profile::FREENOVE_35
+    };
     const NETWORK: bool = !cfg!(feature = "qemu");
 
     fn input(&mut self, app: &mut App, env: &Env) {

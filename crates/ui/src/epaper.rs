@@ -590,7 +590,7 @@ fn paint_setup(c: &mut Canvas<'_>, env: &Env, t: &Theme) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Calibration, Settings, model::LocalTime};
+    use crate::{Settings, model::LocalTime};
 
     fn env() -> Env {
         Env {
@@ -613,7 +613,7 @@ mod tests {
             theme: ThemeKind::Light,
             ..Settings::default()
         };
-        App::new(settings, Some(Calibration::identity()))
+        App::new(crate::Profile::CROWPANEL_579, settings, None)
     }
 
     #[test]

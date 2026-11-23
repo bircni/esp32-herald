@@ -4,7 +4,7 @@ use super::{Region, contains, region};
 use crate::{
     app::App,
     gfx::{self, Align, Canvas, Font},
-    model::{Effect, Env, NetState, ThemeKind, screen},
+    model::{Effect, Env, NetState, ThemeKind},
     theme::Theme,
 };
 
@@ -26,7 +26,7 @@ fn net_line(net: &NetState) -> String {
 
 pub(crate) fn regions(app: &App, env: &Env) -> Vec<Region> {
     vec![region(
-        screen(),
+        super::area(),
         &[
             gfx::str_key(&net_line(&env.net)),
             i64::from(app.settings.brightness),

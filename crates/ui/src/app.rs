@@ -9,8 +9,9 @@ use crate::{
     gfx::{self, Canvas},
     model::{
         ALL_SCREENS, Beep, Calibration, Effect, Env, ItemColor, Led, NetState, RawTouch, Settings,
-        ViewId, screen,
+        ViewId,
     },
+    profile::Profile,
     screen::{Screen, Screens},
     theme::Theme,
     views::{self, Region},
@@ -34,6 +35,7 @@ pub(crate) enum Showing {
     reason = "independent UI flags, not a state machine"
 )]
 pub struct App {
+    profile: Profile,
     pub(crate) settings: Settings,
     pub(crate) calibration: Option<Calibration>,
     pub(crate) view: ViewId,
@@ -69,11 +71,18 @@ pub struct App {
 }
 
 impl App {
-    /// `calibration` is `None` on first boot, which starts with the touch
-    /// calibration screen. So does a calibration made for another layout.
-    pub fn new(settings: Settings, calibration: Option<Calibration>) -> Self {
-        let calibration = calibration.filter(Calibration::fits_screen);
+    /// The app for a board described by `profile`. `calibration` is `None`
+    /// on first boot, which starts with the touch calibration screen. So
+    /// does a calibration made for another layout. Boards without touch
+    /// pass none and get no calibration screen.
+    pub fn new(profile: Profile, settings: Settings, calibration: Option<Calibration>) -> Self {
+        let calibration = if profile.touch {
+            calibration.filter(|c| c.fits(views::W, views::H))
+        } else {
+            Some(Calibration::identity(profile.width, profile.height))
+        };
         Self {
+            profile,
             settings,
             calibrate: calibration
                 .is_none()
@@ -104,6 +113,12 @@ impl App {
     }
 
     // ------------------------------------------------------------ accessors
+
+    /// The board this app runs on.
+    #[must_use]
+    pub const fn profile(&self) -> &Profile {
+        &self.profile
+    }
 
     #[must_use]
     pub const fn settings(&self) -> &Settings {
@@ -530,7 +545,7 @@ impl App {
     }
 
     fn paint(&self, showing: Showing, c: &mut Canvas<'_>, env: &Env, theme: &Theme) {
-        gfx::fill(c, self::screen(), theme.bg);
+        gfx::fill(c, views::area(), theme.bg);
         match showing {
             Showing::Calibrate => views::setup::paint_calibrate(self, c, theme),
             Showing::WifiSetup => views::setup::paint_wifi(c, env, theme),
@@ -579,7 +594,7 @@ impl App {
             })
         };
         let result = if full {
-            paint(self::screen())
+            paint(views::area())
         } else {
             regions
                 .iter()
@@ -625,7 +640,11 @@ mod tests {
             sleep_secs: 0,
             ..Settings::default()
         };
-        App::new(settings, Some(Calibration::identity()))
+        App::new(
+            crate::Profile::FREENOVE_35,
+            settings,
+            Some(Calibration::identity(480, 320)),
+        )
     }
 
     /// Ticks every 30 ms from `from` to `to` and records each view change.
@@ -712,11 +731,15 @@ mod tests {
 
     #[test]
     fn a_calibration_for_another_layout_is_redone() {
-        let mut old = Calibration::identity();
+        let mut old = Calibration::identity(480, 320);
         old.screen = (320, 480);
-        let a = App::new(Settings::default(), Some(old));
+        let a = App::new(crate::Profile::FREENOVE_35, Settings::default(), Some(old));
         assert!(a.calibrate.is_some());
-        let a = App::new(Settings::default(), Some(Calibration::identity()));
+        let a = App::new(
+            crate::Profile::FREENOVE_35,
+            Settings::default(),
+            Some(Calibration::identity(480, 320)),
+        );
         assert!(a.calibrate.is_none());
     }
 }

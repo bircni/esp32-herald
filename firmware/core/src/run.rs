@@ -12,7 +12,7 @@ use esp_idf_svc::{
     nvs::EspDefaultNvsPartition,
     sys,
 };
-use ui::{App, Beep, Calibration, Env, Led};
+use ui::{App, Beep, Env, Led, Profile};
 
 use crate::{
     logger, net,
@@ -28,9 +28,8 @@ pub trait Board {
     /// Time between loop steps (a step that takes longer starts the next
     /// one right away).
     const TICK: Duration;
-    /// Whether the board has a touch panel. Without one there is no
-    /// calibration screen.
-    const TOUCH: bool;
+    /// What the board can do: screen size, inputs, outputs.
+    const PROFILE: Profile;
     /// Whether to start `WiFi` (off for emulators without a radio).
     const NETWORK: bool = true;
 
@@ -105,14 +104,9 @@ where
     let settings = storage.settings().unwrap_or_default();
     let mut timezone = settings.timezone.clone();
     shared::set_timezone(&timezone);
-    // Without a touch panel the identity calibration skips the calibration
-    // screen.
-    let calibration = if B::TOUCH {
-        storage.calibration()
-    } else {
-        Some(Calibration::identity())
-    };
-    let app = App::new(settings, calibration);
+    // Ignored by the app on boards without touch.
+    let calibration = storage.calibration();
+    let app = App::new(B::PROFILE, settings, calibration);
     let shared = Arc::new(Shared::new(app, storage, net::running_slot()));
     if B::NETWORK {
         net::spawn(Arc::clone(&shared), modem, sysloop, nvs)?;

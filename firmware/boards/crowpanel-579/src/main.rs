@@ -22,7 +22,7 @@ use esp_idf_svc::hal::{
 };
 use herald_esp::Shared;
 use ui::{
-    App, Env,
+    App, Env, Profile,
     epaper::{self, Button, Refresher, Renderer, Response},
 };
 
@@ -91,7 +91,7 @@ struct CrowPanel {
 impl herald_esp::Board for CrowPanel {
     /// Button polling interval.
     const TICK: Duration = Duration::from_millis(20);
-    const TOUCH: bool = false;
+    const PROFILE: Profile = Profile::CROWPANEL_579;
 
     fn input(&mut self, app: &mut App, env: &Env) {
         app.tick(env, None);
