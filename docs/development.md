@@ -107,6 +107,10 @@ cd firmware && . ~/export-esp.sh && make clippy-freenove-35 clippy-crowpanel-579
   over HTTP like the web app and Home Assistant do: the gzipped page and
   `ETag`s, items, weather, screens, settings, gestures and the log.
 
+CI runs the same host checks, and for every board in `firmware/boards` the
+firmware lints and release build (`make clippy-<board> image-<board>`); the
+images are kept as build artifacts, ready for the web app's update page.
+
 The lints are the strict set used across these projects (`clippy::pedantic`,
 `nursery` and selected restriction lints, `unsafe_code` denied); the firmware's
 ESP-IDF calls carry `#[expect(unsafe_code, reason = ...)]` one by one.

@@ -1,5 +1,10 @@
 # Plan: make Herald easy to port to other ESP32 boards
 
+**Status: done** (steps 1-5, see `git log`). Left open on purpose: the
+landscape views still use fixed 480x320 positions, and the frame presenter
+only produces black-and-white frames; neither is needed by a board yet.
+How to add a board now: [docs/adding-a-board.md](../adding-a-board.md).
+
 Goal: adding a board means one small crate (pins, display driver, input,
 optional outputs) plus, only if its screen size is new, a layout. Everything
 else (WiFi, MQTT, storage, OTA, log, web app, API, feed, weather, custom
