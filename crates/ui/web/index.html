@@ -208,7 +208,7 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
     <h2>Look</h2>
     <div class="form">
       <div class="field"><label for="d-theme">Theme</label><select id="d-theme" data-key="theme"><option value="dark">Dark</option><option value="light">Light</option></select></div>
-      <label class="check needs-frame"><input type="checkbox" id="d-flip" data-key="upside_down" data-type="bool"> Upside down (USB port at the top)</label>
+      <label class="check"><input type="checkbox" id="d-flip" data-key="upside_down" data-type="bool"> Upside down, for a board standing the other way round</label>
       <div class="field needs-color"><label for="d-accent">Accent colour</label><input type="color" id="d-accent" data-key="accent_color" data-type="color"></div>
       <div class="field needs-backlight"><label for="d-bright">Brightness <span data-out="d-bright"></span></label><input type="range" id="d-bright" data-key="brightness" data-type="int" min="5" max="100" step="5"></div>
       <div class="field needs-backlight"><label for="d-sleep">Turn off after (s without touch, 0 = never)</label><input type="number" id="d-sleep" data-key="sleep_secs" data-type="int" min="0" max="86400"></div>
@@ -396,6 +396,8 @@ function col(c){if(!c)return null;if(Array.isArray(c))return`rgb(${c.map(n=>Math
 const deg=v=>v==null?"–":Math.round(v)+"°";
 function ageStr(s){const m=Math.floor(s/60);if(m<1)return"now";if(m<60)return m+"m";if(m<1440)return Math.floor(m/60)+"h "+String(m%60).padStart(2,"0")+"m";return Math.floor(m/1440)+"d "+Math.floor(m%1440/60)+"h"}
 const box=(x,y,w,h)=>`left:${x}px;top:${y}px;width:${w}px;height:${h}px;`;
+const MC=document.createElement("canvas").getContext("2d");
+function tw(s,size){MC.font=`${size}px "Helvetica Neue",Helvetica,Arial,sans-serif`;return MC.measureText(s).width}
 function txt(x,y,s,size,color,align,w,weight){const a=align||"left",ww=w||300,left=a==="center"?x-ww/2:a==="right"?x-ww:x;return`<div style="${box(left,y-size*.62,ww,size*1.25)}font-size:${size}px;line-height:${size*1.25}px;color:${color};text-align:${a};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;${weight?"font-weight:"+weight:""}">${esc(s)}</div>`}
 function icon(x,y,size,paths,color,sw){return`<div style="${box(x,y,size,size)}">${svg(paths,size,color,sw)}</div>`}
 function navDots(t){if(!S||!S.views)return"";const n=S.views.length,sp=14,x0=240-sp*(n-1)/2;return S.views.map((v,i)=>`<div style="${box(x0+i*sp-3.5,309,7,7)}border-radius:50%;background:${v.name===S.view?t.fg:t.rule}"></div>`).join("")}
@@ -408,7 +410,9 @@ function drawHome(t){
   h+=`<div style="${box(14,148,452,1)}background:${t.rule}"></div>`;
   const items=S.items||[],rows=items.length>5?4:5;
   if(!items.length)h+=txt(240,230,"All quiet",20,t.dim,"center",300);
-  items.slice(0,rows).forEach((it,i)=>{const y=171+i*29,c=col(it.color)||COLORS.grey;h+=it.icon&&IC[it.icon]?icon(13,y-9,18,IC[it.icon],c,2.2):`<div style="${box(16,y-6,12,12)}border-radius:50%;background:${c}"></div>`;h+=txt(38,y,it.text,22,t.fg,"left",320)+txt(466,y,it.detail||ageStr(it.age_s),18,t.dim,"right",110)});
+  // One size for all rows, the largest in which every shown text fits.
+  const rz=z=>z>=22?18:15,room=(it,z)=>466-tw(it.detail||ageStr(it.age_s),rz(z))-12-38,fs=[22,18,15].find(z=>items.slice(0,rows).every(it=>tw(it.text,z)<=room(it,z)))||15;
+  items.slice(0,rows).forEach((it,i)=>{const y=171+i*29,c=col(it.color)||COLORS.grey;h+=it.icon&&IC[it.icon]?icon(13,y-9,18,IC[it.icon],c,2.2):`<div style="${box(16,y-6,12,12)}border-radius:50%;background:${c}"></div>`;const r=it.detail||ageStr(it.age_s);h+=txt(38,y,it.text,fs,t.fg,"left",room(it,fs))+txt(466,y,r,rz(fs),t.dim,"right",110)});
   if(items.length>5)h+=txt(38,171+4*29,`+${items.length-4} more`,18,t.dim);
   return h;
 }

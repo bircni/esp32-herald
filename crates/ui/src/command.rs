@@ -253,7 +253,9 @@ pub fn execute(app: &mut App, env: &Env, command: Command) -> Result<Reply, Reje
             {
                 return Err(reject(400, "x/y must lie on the screen"));
             }
-            app.remote_gesture(gesture, env);
+            if let Some(action) = crate::touch::gesture_action(gesture) {
+                app.act(action, env);
+            }
             ok()
         }
         Command::Display { on } => {

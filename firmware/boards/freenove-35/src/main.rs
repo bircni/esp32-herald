@@ -8,10 +8,9 @@ mod touch;
 use std::time::Duration;
 
 use anyhow::{Result, anyhow};
-use embedded_graphics::{pixelcolor::Rgb565, prelude::DrawTarget};
 use esp_idf_svc::hal::{
     delay::FreeRtos,
-    gpio::{Gpio4, Gpio26, Gpio27, PinDriver},
+    gpio::{Gpio4, Gpio26, Gpio27, Output, PinDriver},
     ledc::{LEDC, LedcDriver, LedcTimerDriver, Resolution, config::TimerConfig},
     spi::{
         Dma, SpiDeviceDriver, SpiDriver,
@@ -21,10 +20,10 @@ use esp_idf_svc::hal::{
 };
 use herald_esp::{Outputs, Shared};
 use mipidsi::{
-    Builder,
+    Builder, NoResetPin,
     interface::SpiInterface,
     models::ST7796,
-    options::{ColorInversion, ColorOrder, Orientation},
+    options::{ColorInversion, ColorOrder, Orientation, Rotation},
 };
 use ui::{App, Env, Profile};
 
@@ -36,6 +35,29 @@ use crate::{
 /// Native size of the panel, before rotation.
 const PANEL_W: u16 = 320;
 const PANEL_H: u16 = 480;
+
+type Lcd = mipidsi::Display<
+    SpiInterface<
+        'static,
+        SpiDeviceDriver<'static, &'static SpiDriver<'static>>,
+        PinDriver<'static, Output>,
+    >,
+    ST7796,
+    NoResetPin,
+>;
+
+/// The panel's orientation, upright or turned by 180 degrees.
+const fn orientation(upside_down: bool) -> Orientation {
+    let upright = Orientation {
+        rotation: board::LCD_ROTATION,
+        mirrored: board::LCD_MIRRORED,
+    };
+    if upside_down {
+        upright.rotate(Rotation::Deg180)
+    } else {
+        upright
+    }
+}
 
 fn main() -> Result<()> {
     let (p, start) = herald_esp::start(board::NAME)?;
@@ -66,10 +88,7 @@ fn main() -> Result<()> {
     let spi_buffer: &'static mut [u8] = Box::leak(vec![0u8; 4096].into_boxed_slice());
     let display = Builder::new(ST7796, SpiInterface::new(lcd_spi, dc, spi_buffer))
         .display_size(PANEL_W, PANEL_H)
-        .orientation(Orientation {
-            rotation: board::LCD_ROTATION,
-            mirrored: board::LCD_MIRRORED,
-        })
+        .orientation(orientation(false))
         .color_order(if board::LCD_BGR {
             ColorOrder::Bgr
         } else {
@@ -92,6 +111,7 @@ fn main() -> Result<()> {
 
     let board = Freenove {
         display,
+        upside_down: false,
         touch: Touch::new(touch_spi),
         backlight,
         speaker,
@@ -132,19 +152,17 @@ fn pwm_outputs(
     Ok((backlight, speaker))
 }
 
-struct Freenove<D> {
-    display: D,
+struct Freenove {
+    display: Lcd,
+    /// How the panel is turned now.
+    upside_down: bool,
     touch: Touch<'static>,
     backlight: Backlight<'static>,
     speaker: Speaker<'static>,
     led: RgbLed<'static>,
 }
 
-impl<D> herald_esp::Board for Freenove<D>
-where
-    D: DrawTarget<Color = Rgb565>,
-    D::Error: core::fmt::Debug,
-{
+impl herald_esp::Board for Freenove {
     /// Also the touch sampling interval the gesture code expects.
     const TICK: Duration = Duration::from_millis(30);
     // QEMU has neither a touch panel nor a WiFi radio.
@@ -155,11 +173,20 @@ where
     const NETWORK: bool = !cfg!(feature = "qemu");
 
     fn input(&mut self, app: &mut App, env: &Env) {
-        app.tick(env, self.touch.read());
+        app.touch(self.touch.read(), env);
+        app.tick(env);
     }
 
     fn present(&mut self, shared: &Shared, env: &Env) {
         let mut app = shared.app();
+        let upside_down = app.settings().upside_down;
+        if upside_down != self.upside_down {
+            match self.display.set_orientation(orientation(upside_down)) {
+                Ok(()) => self.upside_down = upside_down,
+                Err(e) => log::warn!("display: {e:?}"),
+            }
+            app.invalidate();
+        }
         if let Err(e) = app.draw(&mut self.display, env) {
             log::warn!("display: {e:?}");
             app.invalidate();

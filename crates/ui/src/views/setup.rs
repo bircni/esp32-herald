@@ -81,14 +81,15 @@ impl CalibrateState {
 
 pub(crate) fn calibrate_regions(app: &App) -> Vec<Region> {
     let (step, failed) = app
-        .calibrate
+        .touch
         .as_ref()
+        .and_then(|t| t.calibrate.as_ref())
         .map_or((0, false), |s| (s.step as i64, s.failed));
     vec![region(super::area(), &[step, i64::from(failed)])]
 }
 
 pub(crate) fn paint_calibrate(app: &App, c: &mut Canvas<'_>, theme: &Theme) {
-    let Some(state) = app.calibrate.as_ref() else {
+    let Some(state) = app.touch.as_ref().and_then(|t| t.calibrate.as_ref()) else {
         return;
     };
     let center = |c: &mut Canvas<'_>, font, text: &str, y, color| {

@@ -4,17 +4,19 @@ The details behind the [README](../README.md): setting the device up, the web ap
 
 ## First boot on real hardware
 
-1. **Picture check.** The calibration screen should appear upright in
-   landscape, white text on black. If not, change the `LCD_*` constants in
-   `board.rs`: upside down → `LCD_ROTATION` (`Deg90` ↔ `Deg270`), mirrored
-   text → `LCD_MIRRORED`, negative colours → `LCD_INVERTED`, red and blue
-   swapped → `LCD_BGR`.
+1. **Picture check.** On the TFT board the calibration screen should
+   appear in landscape, white text on black. If the text is mirrored, the
+   colours look negative or red and blue are swapped, change `LCD_MIRRORED`,
+   `LCD_INVERTED` or `LCD_BGR` in `firmware/boards/freenove-35/src/board.rs`.
+   A board standing the other way round is turned later with "Upside down"
+   on the web app's Display page (touch follows).
 2. **Touch calibration.** Press and hold each of the four crosses. If presses
    are not noticed, lower `TOUCH_PRESSURE_MIN` in `board.rs`.
 3. **WiFi setup.** The display shows a network name (`Herald-XXXX`) and a
    password. Join it with a phone: the setup page opens by itself (captive
    portal), otherwise open the address shown. Enter your 2.4 GHz WiFi; the
-   device restarts and connects. A tap on the screen skips setup.
+   device restarts and connects. A tap on the screen (or any button)
+   skips setup.
 4. **Web app.** Open the device by its address or host name (`herald` by
    default; your router's DNS usually knows it, mDNS answers `herald.local`).
 

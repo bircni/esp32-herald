@@ -118,7 +118,8 @@ impl Rig {
                 x: (x * 11 + 250) as u16,
                 y: (y * 7 + 300) as u16,
             });
-            self.app.tick(&self.env, raw);
+            self.app.touch(raw, &self.env);
+            self.app.tick(&self.env);
             self.app.take_effects();
             self.check(what);
         }

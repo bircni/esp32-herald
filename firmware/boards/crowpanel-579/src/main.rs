@@ -22,8 +22,8 @@ use esp_idf_svc::hal::{
 };
 use herald_esp::Shared;
 use ui::{
-    App, Env, Profile,
-    epaper::{self, Button, Refresher, Renderer, Response},
+    Action, App, Env, Profile,
+    epaper::{self, Refresher, Renderer},
 };
 
 use crate::{buttons::Buttons, epd::Epd};
@@ -58,12 +58,14 @@ fn main() -> Result<()> {
         PinDriver::output(p.pins.gpio47)?,
         PinDriver::input(p.pins.gpio48, Pull::Floating)?,
     )?;
+    // EXIT and pressing the switch go home; MENU clears ghosting with a
+    // full refresh; turning the switch pages.
     let buttons = Buttons::new([
-        (PinDriver::input(p.pins.gpio1, Pull::Up)?, Button::Exit),
-        (PinDriver::input(p.pins.gpio2, Pull::Up)?, Button::Menu),
-        (PinDriver::input(p.pins.gpio4, Pull::Up)?, Button::Down),
-        (PinDriver::input(p.pins.gpio5, Pull::Up)?, Button::Press),
-        (PinDriver::input(p.pins.gpio6, Pull::Up)?, Button::Up),
+        (PinDriver::input(p.pins.gpio1, Pull::Up)?, Action::Home),
+        (PinDriver::input(p.pins.gpio2, Pull::Up)?, Action::Refresh),
+        (PinDriver::input(p.pins.gpio4, Pull::Up)?, Action::Next),
+        (PinDriver::input(p.pins.gpio5, Pull::Up)?, Action::Home),
+        (PinDriver::input(p.pins.gpio6, Pull::Up)?, Action::Previous),
     ]);
 
     let board = CrowPanel {
@@ -94,14 +96,12 @@ impl herald_esp::Board for CrowPanel {
     const PROFILE: Profile = Profile::CROWPANEL_579;
 
     fn input(&mut self, app: &mut App, env: &Env) {
-        app.tick(env, None);
-        for b in self.buttons.poll() {
-            if epaper::button(app, b, env) == Response::FullRefresh {
-                self.refresher.force_full();
-            }
+        for action in self.buttons.poll() {
+            app.act(action, env);
             // Drawn right away after a button.
             self.next_render = Instant::now();
         }
+        app.tick(env);
     }
 
     fn present(&mut self, shared: &Shared, env: &Env) {
@@ -110,7 +110,10 @@ impl herald_esp::Board for CrowPanel {
         }
         self.next_render = Instant::now() + RENDER_INTERVAL;
         let (frame, flip) = {
-            let app = shared.app();
+            let mut app = shared.app();
+            if app.take_refresh() {
+                self.refresher.force_full();
+            }
             (self.renderer.render(&app, env), app.settings().upside_down)
         };
         // The upright picture stays the same when it is turned.

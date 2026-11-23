@@ -1,15 +1,15 @@
 //! The rotary switch (up, down, press) and the MENU and EXIT buttons. All
-//! pull to ground when pressed.
+//! pull to ground when pressed; each stands for one action.
 
 use esp_idf_svc::hal::gpio::{Input, PinDriver};
-use ui::epaper::Button;
+use ui::Action;
 
 /// A press must read the same for this many polls in a row.
 const STABLE_POLLS: u8 = 2;
 
 struct Key<'d> {
     pin: PinDriver<'d, Input>,
-    button: Button,
+    action: Action,
     pressed: bool,
     count: u8,
 }
@@ -19,13 +19,13 @@ pub struct Buttons<'d> {
 }
 
 impl<'d> Buttons<'d> {
-    pub fn new(pins: impl IntoIterator<Item = (PinDriver<'d, Input>, Button)>) -> Self {
+    pub fn new(pins: impl IntoIterator<Item = (PinDriver<'d, Input>, Action)>) -> Self {
         Self {
             keys: pins
                 .into_iter()
-                .map(|(pin, button)| Key {
+                .map(|(pin, action)| Key {
                     pin,
-                    button,
+                    action,
                     pressed: false,
                     count: 0,
                 })
@@ -33,8 +33,9 @@ impl<'d> Buttons<'d> {
         }
     }
 
-    /// Buttons pressed since the last poll. Call every 10-30 ms.
-    pub fn poll(&mut self) -> Vec<Button> {
+    /// Actions of the buttons pressed since the last poll. Call every
+    /// 10-30 ms.
+    pub fn poll(&mut self) -> Vec<Action> {
         let mut pressed = Vec::new();
         for key in &mut self.keys {
             let down = key.pin.is_low();
@@ -47,7 +48,7 @@ impl<'d> Buttons<'d> {
                 key.pressed = down;
                 key.count = 0;
                 if down {
-                    pressed.push(key.button);
+                    pressed.push(key.action);
                 }
             }
         }

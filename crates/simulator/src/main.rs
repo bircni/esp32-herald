@@ -32,8 +32,9 @@ use embedded_graphics_simulator::{
     sdl2::{Keycode, MouseButton},
 };
 use ui::{
-    App, Calibration, Effect, Env, Led, LocalTime, NetState, Profile, RawTouch, Settings, api,
-    epaper::{self, Button, Refresh, Refresher, Renderer},
+    Action, App, Calibration, Effect, Env, Led, LocalTime, NetState, Profile, RawTouch, Settings,
+    api,
+    epaper::{self, Refresh, Refresher, Renderer},
 };
 
 /// Prints a line like the firmware's log and keeps it for `/api/log`.
@@ -350,7 +351,7 @@ fn run_headless(shared: &Shared) {
         let env = shared.env();
         {
             let mut app = shared.app.lock().unwrap_or_else(PoisonError::into_inner);
-            app.tick(&env, None);
+            app.tick(&env);
             shared.apply_effects(&mut app);
             let Ok(()) = app.draw(&mut display, &env);
         }
@@ -376,7 +377,8 @@ fn run_window(shared: &Shared, fake_adc: bool) {
         let asleep = {
             let mut app = shared.app.lock().unwrap_or_else(PoisonError::into_inner);
             let raw = touch.map(|p| to_raw(p, fake_adc));
-            app.tick(&env, raw);
+            app.touch(raw, &env);
+            app.tick(&env);
             shared.apply_effects(&mut app);
             let Ok(()) = app.draw(&mut display, &env);
             let now_led = app.led();
@@ -426,8 +428,11 @@ fn run_frame(shared: &Shared) {
         if Instant::now() >= next_render {
             let frame = {
                 let mut app = shared.app.lock().unwrap_or_else(PoisonError::into_inner);
-                app.tick(&env, None);
+                app.tick(&env);
                 shared.apply_effects(&mut app);
+                if app.take_refresh() {
+                    refresher.force_full();
+                }
                 let frame = renderer.render(&app, &env);
                 drop(app);
                 frame
@@ -452,27 +457,28 @@ fn run_frame(shared: &Shared) {
         }
         window.update(&display);
         for event in window.events() {
-            let b = match event {
+            let action = match event {
                 SimulatorEvent::Quit => return,
                 SimulatorEvent::KeyDown {
                     keycode,
                     repeat: false,
                     ..
                 } => match keycode {
-                    Keycode::Up | Keycode::Left => Button::Up,
-                    Keycode::Down | Keycode::Right => Button::Down,
-                    Keycode::Return | Keycode::Space => Button::Press,
-                    Keycode::Escape => Button::Exit,
-                    Keycode::M => Button::Menu,
+                    // As on the board: the rotary switch, EXIT and MENU.
+                    Keycode::Up | Keycode::Left => Action::Previous,
+                    Keycode::Down | Keycode::Right => Action::Next,
+                    Keycode::Return | Keycode::Space | Keycode::Escape => Action::Home,
+                    Keycode::M => Action::Refresh,
                     _ => continue,
                 },
                 _ => continue,
             };
             let env = shared.env();
-            let mut app = shared.app.lock().unwrap_or_else(PoisonError::into_inner);
-            if epaper::button(&mut app, b, &env) == epaper::Response::FullRefresh {
-                refresher.force_full();
-            }
+            shared
+                .app
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .act(action, &env);
             next_render = Instant::now();
         }
         thread::sleep(TICK);
@@ -754,6 +760,23 @@ const DEMO_SCREENS: [(&str, &str); 2] = [
     ),
 ];
 
+/// Feed texts as long as Home Assistant entity names get.
+fn long_items(app: &mut App, env: &Env) -> Result<(), String> {
+    for (id, text) in [
+        ("door.terrace", "Living room terrace door open"),
+        ("window.bedroom", "Upstairs bedroom window (left) tilted"),
+        ("door.garage", "Garage door"),
+        (
+            "lock.garden",
+            "Basement laundry room garden door unlocked since noon",
+        ),
+    ] {
+        let body = format!(r#"{{"text":"{text}","color":"yellow","age":4000}}"#);
+        request(app, env, "PUT", &format!("/api/items/{id}"), &body)?;
+    }
+    Ok(())
+}
+
 /// Weather as Home Assistant would push it (Berlin, 2026-11-21), for the
 /// demo data and the screenshots.
 const SAMPLE_WEATHER: &str = r#"{"temp":6.4,"condition":"cloudy","is_day":false,"sunrise":"07:38","sunset":"16:05","hourly":[{"hour":17,"temp":6.4,"rain":23,"condition":"cloudy","is_day":false},{"hour":18,"temp":6.2,"rain":40,"condition":"cloudy","is_day":false},{"hour":19,"temp":5.9,"rain":35,"condition":"rainy","is_day":false},{"hour":20,"temp":5.7,"rain":18,"condition":"rainy","is_day":false},{"hour":21,"temp":5.5,"rain":13,"condition":"rainy","is_day":false},{"hour":22,"temp":5.3,"rain":10,"condition":"cloudy","is_day":false},{"hour":23,"temp":5.2,"rain":20,"condition":"cloudy","is_day":false},{"hour":0,"temp":4.9,"rain":33,"condition":"cloudy","is_day":false},{"hour":1,"temp":4.8,"rain":45,"condition":"rainy","is_day":false},{"hour":2,"temp":4.8,"rain":45,"condition":"rainy","is_day":false},{"hour":3,"temp":4.7,"rain":28,"condition":"cloudy","is_day":false},{"hour":4,"temp":4.5,"rain":13,"condition":"partlycloudy","is_day":false}],"daily":[{"date":"2026-11-21","min":0.6,"max":6.7,"condition":"rainy"},{"date":"2026-11-22","min":2.1,"max":4.9,"condition":"rainy"},{"date":"2026-11-23","min":-0.6,"max":3.0,"condition":"snowy"},{"date":"2026-11-24","min":-1.0,"max":1.7,"condition":"cloudy"}]}"#;
@@ -797,6 +820,9 @@ fn epaper_screenshots(dir: &Path, env: &mut Env) -> Result<usize, String> {
         )?;
     }
     shot(app, env, "overflow")?;
+    request(app, env, "DELETE", "/api/items", "")?;
+    long_items(app, env)?;
+    shot(app, env, "long")?;
     for (name, _) in DEMO_SCREENS {
         post(app, env, "/api/view", &format!(r#"{{"view":"{name}"}}"#))?;
         shot(app, env, &format!("screen-{name}"))?;
@@ -811,7 +837,8 @@ fn epaper_screenshots(dir: &Path, env: &mut Env) -> Result<usize, String> {
 fn run(app: &mut App, env: &mut Env, ms: u64, touch: Option<(i32, i32)>) {
     for _ in 0..ms / 30 {
         env.now_ms += 30;
-        app.tick(env, touch.map(|(x, y)| to_raw(Point::new(x, y), true)));
+        app.touch(touch.map(|(x, y)| to_raw(Point::new(x, y), true)), env);
+        app.tick(env);
     }
     app.take_effects();
 }
@@ -877,6 +904,9 @@ fn screenshots(dir: &Path) -> Result<(), String> {
         )?;
     }
     shot(&mut app, &env, "home-overflow")?;
+    request(&mut app, &env, "DELETE", "/api/items", "")?;
+    long_items(&mut app, &env)?;
+    shot(&mut app, &env, "home-long")?;
     request(&mut app, &env, "DELETE", "/api/items", "")?;
     demo(&mut app, &env)?;
 

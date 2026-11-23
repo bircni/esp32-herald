@@ -850,7 +850,6 @@ name = "herald-freenove-35"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "embedded-graphics",
  "embuild",
  "esp-idf-svc",
  "herald-esp",

@@ -5,7 +5,9 @@ use crate::{model::ItemColor, views::icons::Symbol};
 
 pub const MAX_ITEMS: usize = 16;
 pub const ID_MAX: usize = 32;
-pub const TEXT_MAX: usize = 32;
+/// Longer texts are cut when they arrive; the screens shrink or wrap
+/// what does not fit.
+pub const TEXT_MAX: usize = 64;
 pub const DETAIL_MAX: usize = 12;
 
 #[derive(Clone, Debug, PartialEq, Eq)]

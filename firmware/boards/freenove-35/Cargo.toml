@@ -27,7 +27,6 @@ herald-esp.workspace = true
 ui.workspace = true
 log.workspace = true
 anyhow.workspace = true
-embedded-graphics.workspace = true
 mipidsi.workspace = true
 esp-idf-svc.workspace = true
 

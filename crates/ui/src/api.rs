@@ -718,7 +718,7 @@ mod tests {
     fn items_expire_and_can_alert() {
         let mut a = app();
         call(&mut a, 0, "POST", "/api/view", r#"{"view":"calendar"}"#);
-        a.tick(&env(301_000), None);
+        a.tick(&env(301_000));
         assert!(a.is_asleep());
         let body = r#"{"text":"Door open","color":"yellow","ttl":10}"#;
         call(&mut a, 301_000, "PUT", "/api/items/door", body);
@@ -732,9 +732,9 @@ mod tests {
                 .contains(&Effect::Beep(crate::model::Beep::Notice))
         );
 
-        a.tick(&env(311_999), None);
+        a.tick(&env(311_999));
         assert_eq!(a.feed().len(), 1);
-        a.tick(&env(312_000), None);
+        a.tick(&env(312_000));
         assert!(a.feed().is_empty());
     }
 
@@ -765,7 +765,7 @@ mod tests {
         assert_eq!(call(&mut a, 0, "PUT", "/api/weather", "{}").0, 400);
 
         // Weather that is not refreshed disappears instead of going stale.
-        a.tick(&env(crate::weather::STALE_MS), None);
+        a.tick(&env(crate::weather::STALE_MS));
         assert!(a.weather().is_none());
         assert_eq!(call(&mut a, 0, "DELETE", "/api/weather", "").0, 200);
     }

@@ -39,32 +39,8 @@ pub const PANEL_BYTES: usize = PANEL_ROW_BYTES * PANEL_ROWS;
 pub const FULL_EVERY: u32 = 30;
 
 const MARGIN: i32 = 16;
-/// A feed row: the text, and below it the age or detail.
-const ROW_H: i32 = 50;
 /// Page dots sit at the very bottom.
 const DOTS_Y: i32 = 783;
-
-/// The board's buttons and the rotary switch.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Button {
-    /// Rotary switch turned up: the previous page.
-    Up,
-    /// Rotary switch turned down: the next page.
-    Down,
-    /// Rotary switch pressed: back to the dashboard.
-    Press,
-    /// Clears ghosting with a full refresh.
-    Menu,
-    /// Back to the dashboard.
-    Exit,
-}
-
-/// What a button asks the display to do besides changing the app.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Response {
-    None,
-    FullRefresh,
-}
 
 /// The dashboard, then every custom screen.
 #[must_use]
@@ -76,27 +52,11 @@ pub fn pages(app: &App) -> Vec<ViewId> {
 
 /// The page shown for the app's current view: forecast and calendar are
 /// part of the dashboard here.
-fn page(app: &App) -> ViewId {
+pub(crate) fn page(app: &App) -> ViewId {
     match app.view {
         ViewId::Screen(slot) if app.screens.get(slot).is_some() => app.view,
         ViewId::Home | ViewId::Forecast | ViewId::Calendar | ViewId::Screen(_) => ViewId::Home,
     }
-}
-
-/// Reacts to a button. Counts as a touch: rotation pauses for a while.
-pub fn button(app: &mut App, b: Button, env: &Env) -> Response {
-    app.touched(env.now_ms);
-    let order = pages(app);
-    let i = order.iter().position(|v| *v == page(app)).unwrap_or(0);
-    let n = order.len();
-    let to = match b {
-        Button::Up => order[(i + n - 1) % n],
-        Button::Down => order[(i + 1) % n],
-        Button::Press | Button::Exit => ViewId::Home,
-        Button::Menu => return Response::FullRefresh,
-    };
-    app.set_view(to, env.now_ms);
-    Response::None
 }
 
 /// Black and white, with one grey for gauge tracks (drawn as a dot
@@ -499,7 +459,6 @@ fn paint_days(c: &mut Canvas<'_>, w: &Weather, t: &Theme) -> i32 {
 
 fn paint_feed(app: &App, c: &mut Canvas<'_>, env: &Env, t: &Theme, top: i32, bottom: i32) {
     let items = app.feed.items();
-    let rows = ((bottom - top) / ROW_H).max(1) as usize;
     if items.is_empty() {
         center(
             c,
@@ -510,62 +469,100 @@ fn paint_feed(app: &App, c: &mut Canvas<'_>, env: &Env, t: &Theme, top: i32, bot
         );
         return;
     }
-    let shown = if items.len() > rows { rows - 1 } else { rows };
-    for (i, item) in items.iter().take(shown).enumerate() {
-        let y = top + ROW_H * i as i32 + ROW_H / 2;
-        paint_item(c, item, env, t, y);
-    }
-    if items.len() > rows {
-        let y = top + ROW_H * (rows as i32 - 1) + ROW_H / 2;
-        let more = format!("+{} more", items.len() - shown);
-        gfx::text(
-            c,
-            Font::Medium,
-            &more,
-            Point::new(MARGIN + 28, y),
-            Align::Left,
-            t.fg,
-        );
+    // Rows grow with their text; whatever does not fit is counted below.
+    let rows: Vec<(&Item, Vec<String>)> =
+        items.iter().map(|item| (item, item_lines(item))).collect();
+    let mut y = top;
+    for (i, (item, lines)) in rows.iter().enumerate() {
+        let h = row_height(lines.len());
+        let left = rows.len() - i - 1;
+        let room = if left > 0 { bottom - MORE_H } else { bottom };
+        if y + h > room {
+            let more = format!("+{} more", rows.len() - i);
+            gfx::text(
+                c,
+                Font::Medium,
+                &more,
+                Point::new(TEXT_X, y + MORE_H / 2),
+                Align::Left,
+                t.fg,
+            );
+            return;
+        }
+        paint_item(c, item, lines, env, t, y, h);
+        y += h;
     }
 }
 
-/// One feed row. Without colour, urgency shows as weight: red items are
-/// white on black, yellow ones bold.
-fn paint_item(c: &mut Canvas<'_>, item: &Item, env: &Env, t: &Theme, y: i32) {
-    let (fg, font) = match item.color {
-        ItemColor::Red => (t.bg, Font::Bold),
-        ItemColor::Yellow => (t.fg, Font::Bold),
-        ItemColor::Blue | ItemColor::Green | ItemColor::Grey => (t.fg, Font::Medium),
-    };
-    if item.color == ItemColor::Red {
+/// Feed text starts here, right of the dot or icon.
+const TEXT_X: i32 = MARGIN + 28;
+const LINE_H: i32 = 22;
+/// The "+N more" line.
+const MORE_H: i32 = 30;
+
+/// Without colour, urgency shows as weight: red and yellow items are bold.
+const fn item_font(color: ItemColor) -> Font {
+    match color {
+        ItemColor::Red | ItemColor::Yellow => Font::Bold,
+        ItemColor::Blue | ItemColor::Green | ItemColor::Grey => Font::Medium,
+    }
+}
+
+/// The item's text in at most two lines.
+fn item_lines(item: &Item) -> Vec<String> {
+    gfx::wrap(item_font(item.color), &item.text, W - MARGIN - TEXT_X, 2)
+}
+
+/// Text lines, the age line below, and some air.
+const fn row_height(lines: usize) -> i32 {
+    LINE_H * (lines as i32 + 1) + 6
+}
+
+/// One feed row from `top`, `h` high. Red items are white on black.
+fn paint_item(
+    c: &mut Canvas<'_>,
+    item: &Item,
+    lines: &[String],
+    env: &Env,
+    t: &Theme,
+    top: i32,
+    h: i32,
+) {
+    let fg = if item.color == ItemColor::Red {
         let bar = gfx::rect(
             MARGIN - 6,
-            y - ROW_H / 2 + 3,
+            top + 3,
             (W - 2 * MARGIN + 12) as u32,
-            (ROW_H - 6) as u32,
+            (h - 6) as u32,
         );
         gfx::round_rect(c, bar, 6, t.fg);
-    }
-    let (line1, line2) = (y - 9, y + 13);
-    let icon_at = Point::new(MARGIN + 10, line1);
+        t.bg
+    } else {
+        t.fg
+    };
+    let first = top + 3 + LINE_H / 2 + 1;
+    let icon_at = Point::new(MARGIN + 10, first);
     match item.icon {
         Some(sym) => icons::symbol(c, sym, icon_at, 20, 2.2, fg),
         None => gfx::circle(c, icon_at, 10, fg),
     }
-    let text_x = MARGIN + 28;
-    let text = gfx::shorten(font, &item.text, W - MARGIN - text_x);
-    gfx::text(c, font, &text, Point::new(text_x, line1), Align::Left, fg);
+    let font = item_font(item.color);
+    let mut y = first;
+    for line in lines {
+        gfx::text(c, font, line, Point::new(TEXT_X, y), Align::Left, fg);
+        y += LINE_H;
+    }
     let below = if item.detail.is_empty() {
         feed::age(item.age_ms(env.now_ms))
     } else {
         item.detail.clone()
     };
-    let below = gfx::shorten(Font::Small, &below, W - MARGIN - text_x);
+    let below = gfx::shorten(Font::Small, &below, W - MARGIN - TEXT_X);
     gfx::text(
         c,
         Font::Small,
         &below,
-        Point::new(text_x, line2),
+        Point::new(TEXT_X, y),
         Align::Left,
         fg,
     );
@@ -590,7 +587,7 @@ fn paint_setup(c: &mut Canvas<'_>, env: &Env, t: &Theme) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Settings, model::LocalTime};
+    use crate::{Action, Settings, model::LocalTime};
 
     fn env() -> Env {
         Env {
@@ -698,7 +695,7 @@ mod tests {
     }
 
     #[test]
-    fn buttons_page_through_screens() {
+    fn next_and_previous_page_through_screens() {
         let mut a = app();
         let screen = serde_json::from_str(r#"{"widgets":[{"type":"value","value":"1"}]}"#)
             .unwrap_or_else(|e| panic!("{e}"));
@@ -706,14 +703,19 @@ mod tests {
             .unwrap_or_else(|e| panic!("{e}"));
         let e = env();
         assert_eq!(pages(&a).len(), 2);
-        button(&mut a, Button::Down, &e);
+        a.act(Action::Next, &e);
         assert!(matches!(a.view(), ViewId::Screen(_)));
-        button(&mut a, Button::Down, &e);
+        a.act(Action::Next, &e);
         assert_eq!(a.view(), ViewId::Home, "wraps around");
-        button(&mut a, Button::Up, &e);
+        a.act(Action::Previous, &e);
         assert!(matches!(a.view(), ViewId::Screen(_)));
-        button(&mut a, Button::Exit, &e);
+        a.act(Action::Home, &e);
         assert_eq!(a.view(), ViewId::Home);
-        assert_eq!(button(&mut a, Button::Menu, &e), Response::FullRefresh);
+        assert!(!a.take_refresh());
+        a.act(Action::Refresh, &e);
+        assert!(a.take_refresh());
+        assert!(!a.take_refresh(), "taken once");
+        a.act(Action::Menu, &e);
+        assert_eq!(a.view(), ViewId::Home, "no menu without touch");
     }
 }

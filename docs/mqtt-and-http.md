@@ -33,7 +33,9 @@ The HTTP token does not apply to MQTT; the broker's login does.
 ### Feed items
 
 - `id`: up to 32 of `a-z A-Z 0-9 - _ .`, e.g. `window.kitchen`.
-- `text`: required (or send plain text as the whole payload).
+- `text`: required (or send plain text as the whole payload), up to 64
+  characters. Long texts are drawn smaller on the TFT and wrap onto a
+  second line on the e-paper.
 - `color`: `red`, `yellow`, `blue` (default), `green`, `grey`, or any
   `#RRGGBB` / `[r,g,b]`, mapped to the nearest of these. Items are listed in
   that order; a red or yellow item at the top lights the LED.

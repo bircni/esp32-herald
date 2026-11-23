@@ -2,6 +2,7 @@
 //! and the HTTP API. The firmware and the desktop simulator are thin shells
 //! around this crate.
 
+pub mod action;
 pub mod api;
 pub mod app;
 pub mod color;
@@ -18,10 +19,12 @@ pub mod mqtt;
 pub mod profile;
 pub mod screen;
 pub mod theme;
+pub mod touch;
 pub mod vector;
 pub mod views;
 pub mod weather;
 
+pub use action::Action;
 pub use app::App;
 pub use feed::Item;
 pub use model::{
