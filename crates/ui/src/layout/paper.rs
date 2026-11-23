@@ -248,22 +248,26 @@ pub fn paint_feed(
             );
             return;
         }
-        paint_item(c, col, item, lines, (env, lang), t, (y, h));
+        paint_item(c, col, item, lines, (env, lang), t, y);
         y += h;
     }
 }
 
-/// Without colour, urgency shows as weight: red and yellow items are bold.
-const fn item_font(color: ItemColor) -> Font {
+/// All feed text looks the same; urgency shows in the dot.
+const ITEM_FONT: Font = Font::Medium;
+
+/// Without colour, red and yellow items get a filled dot, the others an
+/// outline.
+const fn urgent(color: ItemColor) -> bool {
     match color {
-        ItemColor::Red | ItemColor::Yellow => Font::Bold,
-        ItemColor::Blue | ItemColor::Green | ItemColor::Grey => Font::Medium,
+        ItemColor::Red | ItemColor::Yellow => true,
+        ItemColor::Blue | ItemColor::Green | ItemColor::Grey => false,
     }
 }
 
 /// The item's text in at most two lines.
 fn item_lines(item: &Item, col: Col) -> Vec<String> {
-    gfx::wrap(item_font(item.color), &item.text, col.text_w(), 2)
+    gfx::wrap(ITEM_FONT, &item.text, col.text_w(), 2)
 }
 
 /// Text lines, the age line below, and some air.
@@ -271,7 +275,7 @@ const fn row_height(lines: usize) -> i32 {
     LINE_H * (lines as i32 + 1) + 6
 }
 
-/// One feed row from `top`, `h` high. Red items are white on black.
+/// One feed row from `top`.
 fn paint_item(
     c: &mut Canvas<'_>,
     col: Col,
@@ -279,30 +283,26 @@ fn paint_item(
     lines: &[String],
     (env, lang): (&Env, Language),
     t: &Theme,
-    (top, h): (i32, i32),
+    top: i32,
 ) {
-    let fg = if item.color == ItemColor::Red {
-        let bar = gfx::rect(
-            col.x + MARGIN - 6,
-            top + 3,
-            (col.inner() + 12) as u32,
-            (h - 6) as u32,
-        );
-        gfx::round_rect(c, bar, 6, t.fg);
-        t.bg
-    } else {
-        t.fg
-    };
+    let fg = t.fg;
     let first = top + 3 + LINE_H / 2 + 1;
     let icon_at = Point::new(col.x + MARGIN + 10, first);
     match item.icon {
         Some(sym) => icons::symbol(c, sym, icon_at, 20, 2.2, fg),
-        None => gfx::circle(c, icon_at, 10, fg),
+        None if urgent(item.color) => gfx::circle(c, icon_at, 11, fg),
+        None => gfx::ring(c, icon_at, 11, 2, fg),
     }
-    let font = item_font(item.color);
     let mut y = first;
     for line in lines {
-        gfx::text(c, font, line, Point::new(col.text_x(), y), Align::Left, fg);
+        gfx::text(
+            c,
+            ITEM_FONT,
+            line,
+            Point::new(col.text_x(), y),
+            Align::Left,
+            fg,
+        );
         y += LINE_H;
     }
     let below = if item.detail.is_empty() {

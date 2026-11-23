@@ -25,6 +25,11 @@ const LEFT: Col = Col { x: 0, w: 264 };
 const MIDDLE: Col = Col { x: 264, w: 264 };
 const RIGHT: Col = Col { x: 528, w: 264 };
 const DOTS_Y: i32 = 263;
+/// The lines across the left and middle columns, in the middle of the
+/// screen.
+const LINE_Y: i32 = H / 2 - 1;
+/// Space between the forecast's line and the hours above, the days below.
+const GAP: i32 = 14;
 
 pub(crate) fn paint(app: &App, c: &mut Canvas<'_>, env: &Env, t: &Theme) {
     if app.showing(env) == Showing::WifiSetup {
@@ -57,24 +62,32 @@ fn divider(c: &mut Canvas<'_>, x: i32, top: i32, t: &Theme) {
 }
 
 fn paint_dashboard(app: &App, c: &mut Canvas<'_>, env: &Env, t: &Theme) {
-    center(c, LEFT, Font::Clock, &paper::time_text(env), 58, t.fg);
+    // Clock and date centred above the middle line, the weather below it.
+    center(c, LEFT, Font::Clock, &paper::time_text(env), 50, t.fg);
     center(
         c,
         LEFT,
         Font::Big,
         &paper::date_text(env, true, app.lang()),
-        124,
+        112,
         t.fg,
     );
-    rule(c, LEFT, 150, t);
+    rule(c, LEFT, LINE_Y, t);
     divider(c, MIDDLE.x, 16, t);
     divider(c, RIGHT.x, 16, t);
 
     if let Some(w) = &app.weather {
         paint_now(c, w, app.lang(), t);
-        let hours_end = paper::paint_hours(c, MIDDLE, 8, w.upcoming(env.local.as_ref()), t);
-        if paper::paint_days(c, MIDDLE, hours_end + 14, (w, app.lang()), t) {
-            rule(c, MIDDLE, hours_end + 6, t);
+        // The line between hours and days sits in the middle of the
+        // screen, both at the same distance from it. Hours take 96 pixels
+        // from their top (time to rain), days 74 from 6 below theirs.
+        let upcoming = w.upcoming(env.local.as_ref());
+        if w.days.is_empty() {
+            paper::paint_hours(c, MIDDLE, LINE_Y - 48, upcoming, t);
+        } else {
+            paper::paint_hours(c, MIDDLE, LINE_Y - GAP - 96, upcoming, t);
+            paper::paint_days(c, MIDDLE, LINE_Y + 2 + GAP - 6, (w, app.lang()), t);
+            rule(c, MIDDLE, LINE_Y, t);
         }
     } else {
         let lang = app.lang();
@@ -100,12 +113,12 @@ fn paint_dashboard(app: &App, c: &mut Canvas<'_>, env: &Env, t: &Theme) {
 
 /// Current weather, below the date.
 fn paint_now(c: &mut Canvas<'_>, w: &Weather, lang: Language, t: &Theme) {
-    icons::weather(c, Point::new(54, 194), 56, w.condition, w.is_day, 1.6, t.fg);
+    icons::weather(c, Point::new(54, 183), 56, w.condition, w.is_day, 1.6, t.fg);
     gfx::text(
         c,
         Font::Huge,
         &deg(w.temp_c),
-        Point::new(98, 188),
+        Point::new(98, 180),
         Align::Left,
         t.fg,
     );
@@ -114,7 +127,7 @@ fn paint_now(c: &mut Canvas<'_>, w: &Weather, lang: Language, t: &Theme) {
         c,
         Font::Body,
         &range,
-        Point::new(100, 226),
+        Point::new(100, 218),
         Align::Left,
         t.fg,
     );
@@ -123,7 +136,7 @@ fn paint_now(c: &mut Canvas<'_>, w: &Weather, lang: Language, t: &Theme) {
         LEFT,
         Font::Medium,
         lang.condition(w.condition),
-        254,
+        246,
         t.fg,
     );
 }
