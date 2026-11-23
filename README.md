@@ -49,17 +49,13 @@ LIBRARY_PATH=/opt/homebrew/lib cargo run -p simulator -- --demo
 A 480x320 window opens (the mouse is your finger) and the web app runs at
 <http://127.0.0.1:8080>.
 
-To flash the board:
+To flash a board (`freenove-35` for the TFT, `crowpanel-579` for the
+e-paper):
 
 ```sh
-cargo install espup espflash ldproxy && espup install --targets esp32
-. ~/export-esp.sh && cd crates/firmware && cargo build --release
-espflash flash --partition-table partitions.csv --erase-parts otadata \
-  target/xtensa-esp32-espidf/release/herald-firmware
+cargo install espup espflash ldproxy && espup install --targets esp32,esp32s3
+. ~/export-esp.sh && cd firmware && make flash-freenove-35
 ```
-
-For the e-paper board, build in `crates/firmware-epaper` instead and flash
-`target/xtensa-esp32s3-espidf/release/herald-epaper`.
 
 On first boot (TFT board), tap the four calibration crosses, then join the `Herald-XXXX`
 network with your phone and enter your WiFi. Later updates go over WiFi from

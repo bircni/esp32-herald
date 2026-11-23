@@ -1,9 +1,9 @@
 [workspace]
 resolver = "2"
 members = ["crates/ui", "crates/simulator"]
-# The firmwares target the ESP32 and ESP32-S3 with their own toolchain and
-# cargo config, so they are built from inside their crate directories.
-exclude = ["crates/firmware", "crates/firmware-epaper"]
+# The firmware (firmware/) is a workspace of its own: it needs the Xtensa
+# toolchain and build-std.
+exclude = ["firmware"]
 
 [workspace.package]
 version = "0.1.0"

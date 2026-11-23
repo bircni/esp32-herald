@@ -1,0 +1,5 @@
+# Freenove ESP32 Display 3.5" (FNK0103): ESP32-WROOM-32E, 4 MB flash, no
+# PSRAM. Added to ../../sdkconfig.defaults.
+
+# 4 MB flash: two 1.94 MB app slots (see partitions.csv).
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y

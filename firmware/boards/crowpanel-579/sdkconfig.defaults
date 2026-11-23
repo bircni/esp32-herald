@@ -1,0 +1,14 @@
+# Elecrow CrowPanel ESP32 5.79" e-paper: ESP32-S3-WROOM-1-N8R8. Added to
+# ../../sdkconfig.defaults.
+
+# 8 MB flash and 8 MB octal PSRAM. Large allocations (the 430 KB drawing
+# buffer) go to PSRAM.
+CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_SPIRAM_USE_MALLOC=y
+CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=4096
+
+# The board's USB port is a CH340 serial chip on UART0.
+CONFIG_ESP_CONSOLE_UART_DEFAULT=y

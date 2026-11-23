@@ -6,7 +6,7 @@ Building, flashing, testing, and why things are the way they are.
 
 Freenove ESP32 Display 3.5" (FNK0103): ESP32-WROOM-32E, 4 MB flash, no PSRAM,
 ST7796 320x480 SPI panel, XPT2046 resistive touch, CH340 USB serial. The wiring
-is documented in [`crates/firmware/src/board.rs`](../crates/firmware/src/board.rs).
+is documented in [`firmware/boards/freenove-35/src/board.rs`](../firmware/boards/freenove-35/src/board.rs).
 
 A speaker (8 Ω, 1 W, PH1.25 plug) is optional; it is only used for beeps.
 
@@ -14,7 +14,7 @@ Elecrow CrowPanel ESP32 5.79" E-Paper HMI Display: ESP32-S3-WROOM-1-N8R8 (8 MB
 flash, 8 MB PSRAM), 792x272 black-and-white e-paper with two SSD1683
 controllers, a rotary switch and MENU/EXIT buttons, no touch. Used upright
 (272x792). Wiring in
-[`crates/firmware-epaper/src/board.rs`](../crates/firmware-epaper/src/board.rs).
+[`firmware/boards/crowpanel-579/src/board.rs`](../firmware/boards/crowpanel-579/src/board.rs).
 
 ## Layout
 
@@ -22,8 +22,9 @@ controllers, a rotary switch and MENU/EXIT buttons, no touch. Used upright
 |---|---|
 | `crates/ui` | All logic and rendering, hardware-free: views, custom screens, gestures, feed, rotation, night mode, weather, HTTP API, MQTT, the web app |
 | `crates/simulator` | Runs `ui` in a desktop window (or headless) and serves the API on localhost |
-| `crates/firmware` | ESP32 target: display, touch, WiFi, storage, OTA, speaker, LED. Built separately from the workspace |
-| `crates/firmware-epaper` | ESP32-S3 e-paper board: panel driver and buttons; the network, MQTT and storage modules are the TFT firmware's, included with `#[path]` |
+| `firmware/core` | `herald-esp`, shared by every board: WiFi and setup mode, the HTTP server, MQTT, storage, OTA, the log and the main loop |
+| `firmware/boards/<board>` | One crate per board: pins, display driver, input and outputs, its `sdkconfig.defaults` and partition table |
+| `firmware/Makefile` | One command per board: `make build-<board>`, `clippy-`, `flash-`, `image-`, `ota-` |
 | `tools/claude-hook.sh` | Example: show Claude Code's state on the display |
 
 ## Try it without the board
@@ -58,29 +59,33 @@ Then, in every new shell:
 
 ```sh
 . ~/export-esp.sh
-cd crates/firmware
-cargo build --release
-espflash flash --partition-table partitions.csv --erase-parts otadata \
-  target/xtensa-esp32-espidf/release/herald-firmware
+cd firmware
+make flash-freenove-35 PORT=/dev/cu.usbserial-10   # or flash-crowpanel-579
 ```
 
-`--erase-parts otadata` makes the device boot what was just written even if
-it last ran an update in the other slot. The first build downloads and
-compiles ESP-IDF into `crates/firmware/.embuild` and takes several minutes.
+The firmware is a cargo workspace of its own (`firmware/`), apart from the
+host workspace, because it needs the Xtensa toolchain and `build-std`. The
+Makefile passes each board's Rust target and sets `ESP_IDF_SYS_ROOT_CRATE`,
+which tells esp-idf-sys whose `sdkconfig.defaults` to use (the shared
+`firmware/sdkconfig.defaults` plus the board's own). Two boards on the same
+chip share ESP-IDF's build output, so switching between them rebuilds it.
+
+Flashing passes `--erase-parts otadata`, so the device boots what was just
+written even if it last ran an update in the other slot. The first build
+downloads and compiles ESP-IDF into `firmware/.embuild` and takes several
+minutes.
 If the board is not found, hold BOOT, tap RESET, release BOOT and try again;
 on macOS the CH340 shows up as `/dev/cu.usbserial-*`.
 
-After the first USB flash, updates go over WiFi: on the web app's System page,
+After the first USB flash, updates go over WiFi: on the web app's System page
+(with the image from `make image-<board>`, in `firmware/target/<board>.bin`),
 or
 
 ```sh
-curl --data-binary @target/xtensa-esp32-espidf/release/herald-firmware.bin \
-  -H 'Content-Type: application/octet-stream' http://herald/api/ota
+make ota-freenove-35 HOST=herald.local TOKEN=...   # TOKEN only if one is set
 ```
 
-with the image from `espflash save-image --chip esp32
-target/xtensa-esp32-espidf/release/herald-firmware herald-firmware.bin`. The
-device writes it into the other slot and restarts. If the new firmware never
+The device writes it into the other slot and restarts. If the new firmware never
 connects to WiFi, the bootloader goes back to the previous one.
 
 ## Testing
@@ -88,7 +93,7 @@ connects to WiFi, the bootloader goes back to the previous one.
 ```sh
 LIBRARY_PATH=/opt/homebrew/lib cargo test --workspace --release
 LIBRARY_PATH=/opt/homebrew/lib cargo clippy --workspace --all-targets
-cd crates/firmware && . ~/export-esp.sh && cargo clippy --release
+cd firmware && . ~/export-esp.sh && make clippy-freenove-35 clippy-crowpanel-579
 ```
 
 - Unit tests in `crates/ui` cover parsing, validation, the API, MQTT topics,
@@ -109,11 +114,12 @@ The firmware can also be booted in Espressif's QEMU, which has no WiFi radio
 and no touch panel, so a special build skips both:
 
 ```sh
-cd crates/firmware
-cargo build --release --features qemu
+cd firmware
+ESP_IDF_SYS_ROOT_CRATE=herald-freenove-35 cargo build --release \
+  -p herald-freenove-35 --target xtensa-esp32-espidf --features qemu
 espflash save-image --chip esp32 --merge --flash-size 4mb \
-  --partition-table partitions.csv \
-  target/xtensa-esp32-espidf/release/herald-firmware flash.bin
+  --partition-table boards/freenove-35/partitions.csv \
+  target/xtensa-esp32-espidf/release/herald-freenove-35 flash.bin
 qemu-system-xtensa -nographic -machine esp32 \
   -drive file=flash.bin,if=mtd,format=raw -serial mon:stdio
 ```

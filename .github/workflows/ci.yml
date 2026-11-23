@@ -43,10 +43,10 @@ jobs:
           toolchain: stable
           components: rustfmt
       # The firmware needs the Xtensa toolchain to build; formatting does not.
-      # The firmwares' rust-toolchain.toml selects the ESP toolchain, which
+      # firmware/rust-toolchain.toml selects the ESP toolchain, which
       # this runner does not have; rustfmt is the same on stable.
       - name: cargo fmt
-        working-directory: crates
+        working-directory: firmware
         env:
           RUSTUP_TOOLCHAIN: stable
-        run: rustfmt --edition 2024 --check firmware/src/*.rs firmware-epaper/src/*.rs
+        run: rustfmt --edition 2024 --check core/src/*.rs boards/*/src/*.rs

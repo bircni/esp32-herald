@@ -1,0 +1,26 @@
+[package]
+name = "herald-esp"
+description = "What every Herald firmware shares: WiFi, MQTT, storage, updates, the log and the main loop."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+# mDNS (`<hostname>.local`) is a separate component since ESP-IDF 5. Picked
+# up by esp-idf-sys because every board crate depends on this one.
+[[package.metadata.esp-idf-sys.extra_components]]
+remote_component = { name = "espressif/mdns", version = "1.15" }
+
+[dependencies]
+ui.workspace = true
+log.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+esp-idf-svc.workspace = true
+
+[lints]
+workspace = true

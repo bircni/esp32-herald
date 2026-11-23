@@ -20,5 +20,7 @@
 //! | Rotary switch press | 5    | low when pressed                     |
 //! | Rotary switch up    | 6    | low when pressed                     |
 
+pub const NAME: &str = "Elecrow CrowPanel 5.79\" e-paper";
+
 /// The panel's controllers take up to 20 MHz.
 pub const EPD_SPI_HZ: u32 = 10_000_000;
