@@ -3,7 +3,9 @@
 //! else in the app.
 
 pub mod landscape;
+mod paper;
 pub mod portrait;
+pub mod wide;
 
 use embedded_graphics::{prelude::*, primitives::Rectangle};
 
@@ -22,14 +24,19 @@ pub enum Layout {
     Landscape,
     /// 272x792 upright: one dashboard and custom screens as pages.
     Portrait,
+    /// 792x272: the dashboard in three columns, custom screens as pages.
+    Wide,
 }
 
 impl Layout {
-    /// The layout for a board's screen: tall screens get the portrait one.
+    /// The layout for a screen: tall ones get the portrait layout, low and
+    /// wide ones the wide layout, the rest the landscape one.
     #[must_use]
-    pub const fn for_profile(profile: &Profile) -> Self {
-        if profile.height > profile.width {
+    pub const fn for_profile(screen: &Profile) -> Self {
+        if screen.height > screen.width {
             Self::Portrait
+        } else if screen.height < 300 {
+            Self::Wide
         } else {
             Self::Landscape
         }
@@ -44,6 +51,7 @@ impl Layout {
                 Point::zero(),
                 Size::new(portrait::W as u32, portrait::H as u32),
             ),
+            Self::Wide => Rectangle::new(Point::zero(), Size::new(wide::W as u32, wide::H as u32)),
         }
     }
 
@@ -57,17 +65,17 @@ impl Layout {
     pub(crate) fn pages(self, app: &App) -> (Vec<ViewId>, ViewId) {
         match self {
             Self::Landscape => (app.nav_order(), app.view),
-            Self::Portrait => (portrait::pages(app), portrait::page(app)),
+            Self::Portrait | Self::Wide => (paper::pages(app), paper::page(app)),
         }
     }
 
     /// Colours: the settings' theme on colour screens; black on white
     /// (white on black with the dark theme) on black-and-white ones. The
-    /// portrait layout is drawn for black and white.
+    /// e-paper layouts are drawn for black and white.
     pub(crate) fn theme(self, app: &App) -> Theme {
         let mono = match self {
             Self::Landscape => !app.profile().color,
-            Self::Portrait => true,
+            Self::Portrait | Self::Wide => true,
         };
         if mono {
             Theme::mono(app.settings.theme == ThemeKind::Dark)
@@ -85,6 +93,10 @@ impl Layout {
                 crate::gfx::fill(c, self.area(), theme.bg);
                 portrait::paint(app, c, env, theme);
             }
+            Self::Wide => {
+                crate::gfx::fill(c, self.area(), theme.bg);
+                wide::paint(app, c, env, theme);
+            }
         }
     }
 
@@ -93,7 +105,7 @@ impl Layout {
     pub(crate) fn regions(self, app: &App, showing: Showing, env: &Env) -> Option<Vec<Region>> {
         match self {
             Self::Landscape => Some(landscape::regions(app, showing, env)),
-            Self::Portrait => None,
+            Self::Portrait | Self::Wide => None,
         }
     }
 }

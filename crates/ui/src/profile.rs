@@ -5,6 +5,8 @@
 use embedded_graphics::{prelude::*, primitives::Rectangle};
 use serde::Serialize;
 
+use crate::model::Orientation;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[expect(
     clippy::struct_excessive_bools,
@@ -28,6 +30,9 @@ pub struct Profile {
     pub speaker: bool,
     /// Keeps the whole picture, so `/api/frame.bmp` can send it.
     pub frame: bool,
+    /// The screen can be used upright or in landscape (the `orientation`
+    /// setting); `width` and `height` are its default way.
+    pub rotatable: bool,
 }
 
 impl Profile {
@@ -44,6 +49,7 @@ impl Profile {
         led: true,
         speaker: true,
         frame: false,
+        rotatable: false,
     };
 
     /// Elecrow `CrowPanel` 5.79" e-paper, upright: 272x792 black and white,
@@ -59,6 +65,7 @@ impl Profile {
         led: false,
         speaker: false,
         frame: true,
+        rotatable: true,
     };
 
     /// Every known board.
@@ -69,13 +76,35 @@ impl Profile {
         Self::ALL.into_iter().find(|p| p.name == name)
     }
 
-    /// The whole screen.
+    /// The whole screen, in its default orientation.
     #[must_use]
     pub const fn area(&self) -> Rectangle {
         Rectangle::new(
             Point::zero(),
             Size::new(self.width as u32, self.height as u32),
         )
+    }
+
+    /// The screen as used with `orientation`: width and height swap when a
+    /// rotatable screen is turned the other way.
+    #[must_use]
+    pub const fn oriented(self, orientation: Orientation) -> Self {
+        let (short, long) = if self.width < self.height {
+            (self.width, self.height)
+        } else {
+            (self.height, self.width)
+        };
+        let (width, height) = match orientation {
+            _ if !self.rotatable => (self.width, self.height),
+            Orientation::Default => (self.width, self.height),
+            Orientation::Upright => (short, long),
+            Orientation::Landscape => (long, short),
+        };
+        Self {
+            width,
+            height,
+            ..self
+        }
     }
 }
 
@@ -89,5 +118,16 @@ mod tests {
             assert_eq!(Profile::by_name(p.name), Some(p));
         }
         assert_eq!(Profile::by_name("nope"), None);
+    }
+
+    #[test]
+    fn rotatable_screens_turn() {
+        let paper = Profile::CROWPANEL_579;
+        let wide = paper.oriented(Orientation::Landscape);
+        assert_eq!((wide.width, wide.height), (792, 272));
+        assert_eq!(wide.oriented(Orientation::Upright).width, 272);
+        assert_eq!(paper.oriented(Orientation::Default), paper);
+        let tft = Profile::FREENOVE_35;
+        assert_eq!(tft.oriented(Orientation::Upright), tft, "not rotatable");
     }
 }

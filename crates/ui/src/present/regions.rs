@@ -52,7 +52,8 @@ impl RegionPresenter {
         let area = layout.area();
         // Layouts without regions are always drawn whole.
         let regions = layout.regions(app, showing, env).unwrap_or_default();
-        let cache_id = Some((showing, theme.key()));
+        // A new theme or language repaints everything.
+        let cache_id = Some((showing, theme.key() | (app.lang() as i64) << 40));
         let full = regions.is_empty()
             || self.cache_screen != cache_id
             || self.cache.len() != regions.len();

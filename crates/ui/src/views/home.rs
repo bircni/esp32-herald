@@ -6,8 +6,9 @@ use embedded_graphics::{prelude::*, primitives::Rectangle};
 use super::{Region, icons, region};
 use crate::{
     app::App,
-    feed::{self, Item},
+    feed::Item,
     gfx::{self, Align, Canvas, Font},
+    i18n::{Language, Text},
     model::{Env, NetState},
     theme::Theme,
     weather::deg,
@@ -40,8 +41,8 @@ const fn right_font(font: Font) -> Font {
 }
 
 /// Room for an item's text in `font`, left of its age or detail.
-fn text_width(item: &Item, font: Font, now_ms: u64) -> i32 {
-    let right = gfx::text_width(right_font(font), &right_text(item, now_ms));
+fn text_width(item: &Item, font: Font, now_ms: u64, lang: Language) -> i32 {
+    let right = gfx::text_width(right_font(font), &right_text(item, now_ms, lang));
     ROW_RIGHT - right - 12 - ROW_TEXT_X
 }
 
@@ -56,9 +57,9 @@ fn rows_font(app: &App, env: &Env) -> Font {
     ROW_FONTS
         .into_iter()
         .find(|f| {
-            shown
-                .iter()
-                .all(|item| gfx::text_width(*f, &item.text) <= text_width(item, *f, env.now_ms))
+            shown.iter().all(|item| {
+                gfx::text_width(*f, &item.text) <= text_width(item, *f, env.now_ms, app.lang())
+            })
         })
         .unwrap_or(Font::Body)
 }
@@ -80,16 +81,13 @@ fn time_text(env: &Env) -> String {
     )
 }
 
-pub(crate) fn date_line(env: &Env) -> String {
+pub(crate) fn date_line(env: &Env, lang: Language) -> String {
     match env.local {
-        Some(t) => format!(
-            "{} {} {}",
-            crate::model::weekday_abbr(t.weekday),
-            t.day,
-            t.month_name()
-        ),
-        None if matches!(env.net, NetState::Connected { .. }) => "Waiting for time sync".into(),
-        None => "No WiFi, time not set".into(),
+        Some(t) => lang.date(&t),
+        None if matches!(env.net, NetState::Connected { .. }) => {
+            lang.text(Text::WaitingForTimeSync).into()
+        }
+        None => lang.text(Text::NoWifiNoTime).into(),
     }
 }
 
@@ -114,9 +112,9 @@ fn row(app: &App, i: usize) -> Row<'_> {
     items.get(i).map_or(Row::Empty, Row::Item)
 }
 
-fn right_text(item: &Item, now_ms: u64) -> String {
+fn right_text(item: &Item, now_ms: u64, lang: Language) -> String {
     if item.detail.is_empty() {
-        feed::age(item.age_ms(now_ms))
+        lang.age(item.age_ms(now_ms))
     } else {
         item.detail.clone()
     }
@@ -125,7 +123,7 @@ fn right_text(item: &Item, now_ms: u64) -> String {
 pub(crate) fn regions(app: &App, env: &Env) -> Vec<Region> {
     let mut regions = vec![
         region(CLOCK, &[gfx::str_key(&time_text(env))]),
-        region(DATE, &[gfx::str_key(&date_line(env))]),
+        region(DATE, &[gfx::str_key(&date_line(env, app.lang()))]),
     ];
     let mut weather = vec![app.weather.is_some().into()];
     if let Some(w) = &app.weather {
@@ -146,7 +144,7 @@ pub(crate) fn regions(app: &App, env: &Env) -> Vec<Region> {
                 1,
                 font,
                 gfx::str_key(&item.text),
-                gfx::str_key(&right_text(item, env.now_ms)),
+                gfx::str_key(&right_text(item, env.now_ms, app.lang())),
                 item.color as i64,
                 item.icon.map_or(-1, |s| s as i64),
             ],
@@ -168,7 +166,12 @@ pub(crate) fn paint(app: &App, c: &mut Canvas<'_>, env: &Env, theme: &Theme) {
         Align::Left,
         theme.fg,
     );
-    let date = gfx::shorten(Font::Big, &date_line(env), DATE.size.width as i32 - 24);
+    let lang = app.lang();
+    let date = gfx::shorten(
+        Font::Big,
+        &date_line(env, lang),
+        DATE.size.width as i32 - 24,
+    );
     gfx::text(
         c,
         Font::Big,
@@ -194,8 +197,8 @@ pub(crate) fn paint(app: &App, c: &mut Canvas<'_>, env: &Env, theme: &Theme) {
                     Some(sym) => icons::symbol(c, sym, Point::new(22, y), 18, 2.2, color),
                     None => gfx::circle(c, Point::new(22, y), 12, color),
                 }
-                let right = right_text(item, env.now_ms);
-                let text = gfx::shorten(font, &item.text, text_width(item, font, env.now_ms));
+                let right = right_text(item, env.now_ms, lang);
+                let text = gfx::shorten(font, &item.text, text_width(item, font, env.now_ms, lang));
                 gfx::text(
                     c,
                     font,
@@ -216,7 +219,7 @@ pub(crate) fn paint(app: &App, c: &mut Canvas<'_>, env: &Env, theme: &Theme) {
             Row::More(n) => gfx::text(
                 c,
                 Font::Medium,
-                &format!("+{n} more"),
+                &lang.more(n),
                 Point::new(ROW_TEXT_X, y),
                 Align::Left,
                 theme.dim,
@@ -224,7 +227,7 @@ pub(crate) fn paint(app: &App, c: &mut Canvas<'_>, env: &Env, theme: &Theme) {
             Row::Quiet => gfx::text(
                 c,
                 Font::Medium,
-                "All quiet",
+                lang.text(Text::AllQuiet),
                 Point::new(240, y),
                 Align::Center,
                 theme.dim,
@@ -246,8 +249,8 @@ fn paint_weather(app: &App, c: &mut Canvas<'_>, theme: &Theme) {
         );
     };
     let Some(w) = &app.weather else {
-        centered(c, "No weather yet", 60, theme.dim);
-        centered(c, "Comes in over MQTT", 82, theme.dim);
+        centered(c, app.lang().text(Text::NoWeatherYet), 60, theme.dim);
+        centered(c, app.lang().text(Text::ComesOverMqtt), 82, theme.dim);
         return;
     };
     icons::weather(
@@ -267,7 +270,7 @@ fn paint_weather(app: &App, c: &mut Canvas<'_>, theme: &Theme) {
         Align::Left,
         theme.fg,
     );
-    centered(c, w.condition.label(), 98, theme.fg);
+    centered(c, app.lang().condition(w.condition), 98, theme.fg);
     centered(
         c,
         &format!("{} / {}", deg(w.min_c), deg(w.max_c)),

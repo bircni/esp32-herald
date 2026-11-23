@@ -19,7 +19,8 @@ client sends it what to show.
 
 ![The web app: a live mirror of the device's screen with view buttons, brightness and status](docs/images/web-overview.png)
 
-On the e-paper board, used upright, everything is on one tall page:
+On the e-paper board, used upright, everything is on one tall page; in
+landscape (chosen on the web app's Display page) it is three columns:
 
 <p align="center">
   <img src="docs/images/epaper.png" width="160" alt="The e-paper dashboard: clock, weather, the next hours, the feed and the next days">
@@ -43,7 +44,7 @@ On the e-paper board, used upright, everything is on one tall page:
 | Board | Name | Screen | Input |
 |---|---|---|---|
 | Freenove ESP32 Display 3.5" (FNK0103) | `freenove-35` | 480x320 colour TFT | touch |
-| Elecrow CrowPanel ESP32 5.79" E-Paper | `crowpanel-579` | 272x792 e-paper, upright | rotary switch, buttons |
+| Elecrow CrowPanel ESP32 5.79" E-Paper | `crowpanel-579` | 272x792 e-paper, upright or landscape | rotary switch, buttons |
 
 Another board is one small crate with its pins and drivers; see
 [Adding a board](docs/adding-a-board.md).

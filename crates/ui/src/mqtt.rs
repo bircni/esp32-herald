@@ -12,28 +12,23 @@
 //! | `<prefix>/settings`    | any subset of the settings           |
 //! | `<prefix>/weather`     | weather JSON, see [`crate::weather::Pushed`]; empty removes |
 //!
-//! The device publishes `<prefix>/state` (retained JSON, as `GET
-//! /api/state`), `<prefix>/status` (`online`, or `offline` as last will) and
-//! `<prefix>/error` (why a message was rejected, see [`error_payload`]).
+//! The device publishes `<prefix>/status` (`online`, or `offline` as last
+//! will) and `<prefix>/error` (why a message was rejected, see
+//! [`error_payload`]). It does not publish its state: `GET /api/state` has
+//! it for whoever asks.
 
 use serde::Deserialize;
-use serde_json::Value;
 
 use crate::{
     app::App,
-    command::{
-        Command, Rejection, Transport, check_item_id, parse_item, parse_json, reject, state,
-    },
-    gfx,
-    model::{Env, Settings},
+    command::{Command, Rejection, Transport, check_item_id, parse_item, parse_json, reject},
+    model::Settings,
 };
 
 /// Payloads larger than this are rejected.
 pub const MAX_PAYLOAD: usize = 4096;
 pub const ONLINE: &str = "online";
 pub const OFFLINE: &str = "offline";
-/// The state is published when it changes, and at least this often.
-const STATE_INTERVAL_MS: u64 = 60_000;
 
 /// Connection settings; `None` from [`Config::from_settings`] means MQTT is off.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -93,8 +88,10 @@ impl Config {
         format!("{}/status", self.prefix)
     }
 
+    /// Where older versions published their state, retained; cleared once
+    /// on connecting so it does not linger on the broker.
     #[must_use]
-    pub fn state_topic(&self) -> String {
+    pub fn old_state_topic(&self) -> String {
         format!("{}/state", self.prefix)
     }
 
@@ -212,52 +209,14 @@ pub fn error_payload(msg: &Message<'_>, rejection: &Rejection) -> String {
     .to_string()
 }
 
-/// Decides when `<prefix>/state` is published.
-#[derive(Default)]
-pub struct StatePublisher {
-    last_key: Option<i64>,
-    last_ms: u64,
-}
-
-impl StatePublisher {
-    /// Publish again on the next call, e.g. after reconnecting.
-    pub const fn reset(&mut self) {
-        self.last_key = None;
-    }
-
-    /// The payload to publish now, if any.
-    pub fn due(&mut self, app: &App, env: &Env) -> Option<String> {
-        let mut snapshot = state(app, env);
-        let payload = snapshot.to_string();
-        // Ignore what changes all the time, so a publish means news.
-        if let Some(fields) = snapshot.as_object_mut() {
-            fields.remove("uptime_s");
-            fields.remove("time");
-            if let Some(Value::Array(items)) = fields.get_mut("items") {
-                for item in items.iter_mut().filter_map(Value::as_object_mut) {
-                    item.remove("age_s");
-                    item.remove("remaining_s");
-                }
-            }
-        }
-        let key = gfx::str_key(&snapshot.to_string());
-        let stale = env.now_ms.saturating_sub(self.last_ms) >= STATE_INTERVAL_MS;
-        if self.last_key == Some(key) && !stale {
-            return None;
-        }
-        self.last_key = Some(key);
-        self.last_ms = env.now_ms;
-        Some(payload)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{
         command::{Reply, handle},
-        model::{Calibration, ItemColor},
+        model::{Calibration, Env, ItemColor},
     };
+    use serde_json::Value;
 
     fn app() -> App {
         App::new(
@@ -448,28 +407,7 @@ mod tests {
         assert_eq!(c.url(), "mqtt://broker.lan:1883");
         assert_eq!(c.subscriptions()[0], "herald/item/+");
         assert_eq!(c.status_topic(), "herald/status");
-        assert_eq!(c.state_topic(), "herald/state");
+        assert_eq!(c.old_state_topic(), "herald/state");
         assert_eq!(c.error_topic(), "herald/error");
-    }
-
-    #[test]
-    fn state_is_published_on_change_and_once_a_minute() {
-        let mut a = app();
-        let mut p = StatePublisher::default();
-        let env = |now_ms| Env {
-            now_ms,
-            ..Env::default()
-        };
-        assert!(p.due(&a, &env(0)).is_some(), "first call publishes");
-        assert!(p.due(&a, &env(5_000)).is_none(), "uptime alone is no news");
-
-        send(&mut a, 6_000, "home/herald/item/x", r#"{"text":"x"}"#).unwrap();
-        let payload = p.due(&a, &env(6_000)).expect("new item");
-        assert!(payload.contains(r#""id":"x""#));
-        assert!(p.due(&a, &env(30_000)).is_none(), "ageing is no news");
-        assert!(p.due(&a, &env(66_000)).is_some(), "but a minute passed");
-
-        p.reset();
-        assert!(p.due(&a, &env(66_100)).is_some(), "after reconnecting");
     }
 }

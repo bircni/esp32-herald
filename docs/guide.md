@@ -35,7 +35,10 @@ costs nothing; all rendering happens in the browser.
 - **Feed:** the items, with their age, and removal.
 - **Screens:** your custom screens, and a builder with live preview that
   publishes them (see [Custom screens](guide.md#custom-screens)).
-- **Display:** theme, accent colour, brightness, sleep, rotation, night mode.
+- **Display:** display language (English or German; the web app stays
+  English), orientation (on the e-paper: upright or landscape), upside down,
+  theme, accent colour, brightness, sleep, rotation, night mode. Controls a
+  board cannot use are hidden.
 - **Connections:** WiFi, host name, time zone, time server, MQTT, and the
   topic reference with your prefix filled in.
 - **System:** firmware version and slot, update upload, restart, settings

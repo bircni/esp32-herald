@@ -3,6 +3,8 @@
 use embedded_graphics::{pixelcolor::Rgb565, prelude::*};
 use serde::{Deserialize, Serialize};
 
+pub use crate::i18n::Language;
+
 /// A view: one of the built-in ones, or a custom screen by its slot in
 /// [`crate::screen::Screens`]. Names are resolved by the app, as custom
 /// screens come and go.
@@ -61,6 +63,19 @@ pub enum ThemeKind {
     #[default]
     Dark,
     Light,
+}
+
+/// How a screen that works both ways is used.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum Orientation {
+    /// The board's own way (see [`crate::Profile`]).
+    #[default]
+    Default,
+    /// Taller than wide.
+    Upright,
+    /// Wider than tall.
+    Landscape,
 }
 
 /// Colour of the on-board RGB LED.
@@ -127,6 +142,11 @@ pub struct Settings {
     /// Turns the picture by 180 degrees, for a board standing the other way
     /// round (e-paper boards).
     pub upside_down: bool,
+    /// What the displays say: English or German.
+    pub language: Language,
+    /// Upright or landscape, on boards whose screen works both ways
+    /// (`Profile::rotatable`); others ignore it.
+    pub orientation: Orientation,
     /// Accent colour as `#RRGGBB`.
     pub accent_color: String,
     /// Backlight brightness in percent (5..=100).
@@ -173,6 +193,8 @@ impl Default for Settings {
             ntp_server: "pool.ntp.org".into(),
             theme: ThemeKind::Dark,
             upside_down: false,
+            language: Language::En,
+            orientation: Orientation::Default,
             accent_color: "#35D0FF".into(),
             brightness: 80,
             sleep_secs: 300,
@@ -471,12 +493,6 @@ pub fn weekday_of(year: u16, month: u8, day: u8) -> u8 {
     ((sunday_based + 6) % 7) as u8
 }
 
-/// `Mon` .. `Sun`, for 0 = Monday.
-#[must_use]
-pub fn weekday_abbr(weekday: u8) -> &'static str {
-    ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][usize::from(weekday) % 7]
-}
-
 #[must_use]
 pub const fn days_in_month(year: u16, month: u8) -> u8 {
     match month {
@@ -505,45 +521,6 @@ pub struct LocalTime {
 }
 
 impl LocalTime {
-    #[must_use]
-    pub fn weekday_name(&self) -> &'static str {
-        const NAMES: [&str; 7] = [
-            "Monday",
-            "Tuesday",
-            "Wednesday",
-            "Thursday",
-            "Friday",
-            "Saturday",
-            "Sunday",
-        ];
-        NAMES[usize::from(self.weekday) % 7]
-    }
-
-    #[must_use]
-    pub fn month_name(&self) -> &'static str {
-        const NAMES: [&str; 12] = [
-            "January",
-            "February",
-            "March",
-            "April",
-            "May",
-            "June",
-            "July",
-            "August",
-            "September",
-            "October",
-            "November",
-            "December",
-        ];
-        NAMES[usize::from(self.month.clamp(1, 12)) - 1]
-    }
-
-    /// e.g. `19 November 2026`
-    #[must_use]
-    pub fn date_string(&self) -> String {
-        format!("{} {} {}", self.day, self.month_name(), self.year)
-    }
-
     #[must_use]
     pub fn minute_of_day(&self) -> u16 {
         u16::from(self.hour) * 60 + u16::from(self.minute)
@@ -774,8 +751,6 @@ mod tests {
             minute: 5,
             second: 0,
         };
-        assert_eq!(t.weekday_name(), "Thursday");
-        assert_eq!(t.date_string(), "19 November 2026");
         assert_eq!(t.minute_of_day(), 18 * 60 + 5);
     }
 

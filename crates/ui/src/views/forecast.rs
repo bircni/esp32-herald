@@ -7,8 +7,8 @@ use super::{Region, icons, region};
 use crate::{
     app::App,
     gfx::{self, Align, Canvas, Font},
+    i18n::{Language, Text},
     model::Env,
-    model::weekday_abbr,
     theme::Theme,
     weather::{Hour, Weather, deg},
 };
@@ -61,20 +61,27 @@ pub(crate) fn paint(app: &App, c: &mut Canvas<'_>, env: &Env, theme: &Theme) {
         let center = |c: &mut Canvas<'_>, font, text: &str, y, color| {
             gfx::text(c, font, text, Point::new(240, y), Align::Center, color);
         };
-        center(c, Font::Large, "No forecast yet", 140, theme.fg);
-        center(c, Font::Body, "Send one over MQTT", 172, theme.dim);
+        let lang = app.lang();
+        center(
+            c,
+            Font::Large,
+            lang.text(Text::NoForecastYet),
+            140,
+            theme.fg,
+        );
+        center(c, Font::Body, lang.text(Text::SendOverMqtt), 172, theme.dim);
         return;
     };
     gfx::text(
         c,
         Font::Body,
-        "Next hours",
+        app.lang().text(Text::NextHours),
         Point::new(16, 18),
         Align::Left,
         theme.dim,
     );
     paint_hours(c, hours, theme);
-    paint_days(c, w, theme);
+    paint_days(c, w, app.lang(), theme);
 }
 
 fn paint_hours(c: &mut Canvas<'_>, hours: &[Hour], theme: &Theme) {
@@ -126,7 +133,7 @@ fn paint_hours(c: &mut Canvas<'_>, hours: &[Hour], theme: &Theme) {
     }
 }
 
-fn paint_days(c: &mut Canvas<'_>, w: &Weather, theme: &Theme) {
+fn paint_days(c: &mut Canvas<'_>, w: &Weather, lang: Language, theme: &Theme) {
     for (i, d) in w.days.iter().take(4).enumerate() {
         let x = 24 + CARD_STEP * i as i32;
         gfx::round_rect(
@@ -137,9 +144,9 @@ fn paint_days(c: &mut Canvas<'_>, w: &Weather, theme: &Theme) {
         );
         let cx = x + CARD_SIZE as i32 / 2;
         let name = if i == 0 {
-            "Today"
+            lang.text(Text::Today)
         } else {
-            weekday_abbr(d.weekday)
+            lang.weekday_abbr(d.weekday)
         };
         gfx::text(
             c,

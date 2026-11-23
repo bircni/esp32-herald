@@ -112,18 +112,6 @@ impl Feed {
     }
 }
 
-/// Compact age: `now`, `12m`, `3h 05m`, `2d 4h`.
-#[must_use]
-pub fn age(ms: u64) -> String {
-    let m = ms / 60_000;
-    match m {
-        0 => "now".into(),
-        1..=59 => format!("{m}m"),
-        60..=1439 => format!("{}h {:02}m", m / 60, m % 60),
-        _ => format!("{}d {}h", m / 1440, m % 1440 / 60),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -217,6 +205,7 @@ mod tests {
 
     #[test]
     fn ages() {
+        let age = |ms| crate::i18n::Language::En.age(ms);
         assert_eq!(age(59_999), "now");
         assert_eq!(age(60_000), "1m");
         assert_eq!(age(59 * 60_000), "59m");

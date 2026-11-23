@@ -12,6 +12,7 @@ pub mod dns;
 pub mod feed;
 pub mod gesture;
 pub mod gfx;
+pub mod i18n;
 pub mod layout;
 pub mod logbuf;
 pub mod model;
@@ -29,7 +30,8 @@ pub use action::Action;
 pub use app::App;
 pub use feed::Item;
 pub use model::{
-    Beep, Calibration, Effect, Env, ItemColor, Led, LocalTime, NetState, RawTouch, Settings, ViewId,
+    Beep, Calibration, Effect, Env, ItemColor, Language, Led, LocalTime, NetState, Orientation,
+    RawTouch, Settings, ViewId,
 };
 pub use profile::Profile;
 

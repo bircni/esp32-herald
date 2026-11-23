@@ -45,7 +45,7 @@ pub(crate) fn paint(app: &App, showing: Showing, c: &mut Canvas<'_>, env: &Env, 
     gfx::fill(c, views::area(), theme.bg);
     match showing {
         Showing::Calibrate => views::setup::paint_calibrate(app, c, theme),
-        Showing::WifiSetup => views::setup::paint_wifi(c, env, theme),
+        Showing::WifiSetup => views::setup::paint_wifi(c, env, theme, app.lang()),
         Showing::Menu => views::menu::paint(app, c, env, theme),
         Showing::View(view) => {
             match view {

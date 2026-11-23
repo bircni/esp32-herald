@@ -11,7 +11,7 @@ use serde_json::{Map, Value, json};
 use crate::{
     app::App,
     color::Color,
-    de::opt_number,
+    de::opt_whole,
     feed::{self, Item},
     gesture::Gesture,
     logbuf,
@@ -91,14 +91,14 @@ pub struct ItemBody {
     #[serde(default)]
     pub detail: String,
     /// Seconds the reported state has already lasted.
-    #[serde(default, deserialize_with = "opt_number")]
+    #[serde(default, deserialize_with = "opt_whole")]
     pub age: Option<u64>,
     /// Unix time (seconds) the reported state began. Better than `age` for
     /// retained MQTT messages, which may be delivered much later.
-    #[serde(default, deserialize_with = "opt_number")]
+    #[serde(default, deserialize_with = "opt_whole")]
     pub since: Option<i64>,
     /// Seconds until the item disappears on its own.
-    #[serde(default, deserialize_with = "opt_number")]
+    #[serde(default, deserialize_with = "opt_whole")]
     pub ttl: Option<u32>,
     /// Wake the display and show the home view.
     #[serde(default)]
@@ -249,7 +249,7 @@ pub fn execute(app: &mut App, env: &Env, command: Command) -> Result<Reply, Reje
         }
         Command::Touch(gesture) => {
             if let Gesture::Tap(p) | Gesture::LongPress(p) = gesture
-                && !app.profile().area().contains(p)
+                && !app.layout().area().contains(p)
             {
                 return Err(reject(400, "x/y must lie on the screen"));
             }
@@ -482,7 +482,7 @@ pub fn state(app: &App, env: &Env) -> Value {
         "firmware": { "slot": env.firmware_slot, "ota": env.firmware_slot.is_some() },
         "screens_rev": app.screens().rev().to_string(),
         // What the board can do; the web app shows only what applies.
-        "device": app.profile(),
+        "device": app.screen(),
         // Boards that keep their picture: the web app shows /api/frame.bmp
         // (changes with this) instead of drawing the screen itself.
         "frame": app.shown_frame.as_ref().map(|(rev, _)| rev.to_string()),
@@ -511,7 +511,7 @@ pub fn state(app: &App, env: &Env) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::Calibration;
+    use crate::model::{Calibration, ItemColor};
 
     fn app() -> App {
         App::new(
@@ -596,6 +596,40 @@ mod tests {
 
         let both = put(&mut a, &env, "b", r#"{"text":"x","since":1,"age":1}"#);
         assert_eq!(both.unwrap_err().status, 400);
+    }
+
+    #[test]
+    fn home_assistant_items_with_fractions_and_other_colours() {
+        let mut a = app();
+        let env = Env {
+            now_ms: 10_000,
+            unix_s: Some(1_795_440_500),
+            ..Env::default()
+        };
+        // As Home Assistant's templates send them.
+        for (id, body, color) in [
+            (
+                "a",
+                "{\n \"since\" : 1795440418.34157,\n \"text\" : \"Well open\",\n \"color\" : \"green\"\n}\n",
+                ItemColor::Green,
+            ),
+            (
+                "b",
+                r#"{"color":"orange","since":1795425422.34827,"text":"Letterbox"}"#,
+                ItemColor::Yellow,
+            ),
+            (
+                "c",
+                r#"{"color":"off","since":"1795417635.35828","text":"Rain sensor"}"#,
+                ItemColor::Grey,
+            ),
+        ] {
+            put(&mut a, &env, id, body).unwrap_or_else(|e| panic!("{id}: {}", e.message));
+            let item = a.feed().iter().find(|i| i.id == id).unwrap();
+            assert_eq!(item.color, color, "{id}");
+        }
+        let well = a.feed().iter().find(|i| i.id == "a").unwrap();
+        assert_eq!(well.age_ms(10_000), 82_000, "the fraction is dropped");
     }
 
     #[test]

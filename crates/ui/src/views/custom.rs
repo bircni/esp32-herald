@@ -14,6 +14,7 @@ use crate::{
     color::Color,
     de::format_float,
     gfx::{self, Align, Canvas, Font},
+    i18n::{Language, Text},
     model::Env,
     screen::{ChartStyle, Entry, GaugeStyle, Row, TextSize, Widget, Zone},
     theme::Theme,
@@ -399,9 +400,10 @@ fn widget(app: &App, widget: &Widget, c: &mut Canvas<'_>, env: &Env, cell: &Cell
             color,
         } => {
             cell.label(c, label);
-            let text = env
-                .unix_s
-                .map_or_else(|| "--:--".to_owned(), |now| countdown(until - now));
+            let text = env.unix_s.map_or_else(
+                || "--:--".to_owned(),
+                |now| countdown(until - now, app.lang()),
+            );
             cell.centered(c, &text, cy + 6, cell.big(), cell.color(*color, t.accent));
         }
         Widget::Text { text, color, size } => {
@@ -456,11 +458,11 @@ fn zone_color(zones: &[Zone], value: f32, theme: &Theme) -> Option<Rgb565> {
 
 /// As in the web app: `2d 4h`, `1:05` (hours and minutes) in the last day,
 /// `4:09` (minutes and seconds) in the last hour.
-fn countdown(left: i64) -> String {
+fn countdown(left: i64, lang: Language) -> String {
     let left = left.max(0);
     let (d, h, m, s) = (left / 86_400, left / 3600 % 24, left / 60 % 60, left % 60);
     if d > 0 {
-        format!("{d}d {h}h")
+        format!("{d}{} {h}h", lang.day_letter())
     } else if h > 0 {
         format!("{h}:{m:02}")
     } else {
@@ -605,7 +607,7 @@ fn weather(app: &App, c: &mut Canvas<'_>, cell: &Cell<'_>) {
     let t = cell.theme;
     let (cx, cy) = (cell.cx(), cell.cy());
     let Some(w) = &app.weather else {
-        cell.centered(c, "No weather", cy, 14.0, t.dim);
+        cell.centered(c, app.lang().text(Text::NoWeather), cy, 14.0, t.dim);
         return;
     };
     let size = (cell.h() as f32 * 0.38)
@@ -623,7 +625,13 @@ fn weather(app: &App, c: &mut Canvas<'_>, cell: &Cell<'_>) {
         Align::Left,
         t.fg,
     );
-    cell.centered(c, w.condition.label(), cy + size / 2 + 8, 13.0, t.dim);
+    cell.centered(
+        c,
+        app.lang().condition(w.condition),
+        cy + size / 2 + 8,
+        13.0,
+        t.dim,
+    );
 }
 
 #[cfg(test)]
@@ -651,10 +659,12 @@ mod tests {
 
     #[test]
     fn countdown_like_the_web_app() {
-        assert_eq!(countdown(-5), "0:00");
-        assert_eq!(countdown(65), "1:05");
-        assert_eq!(countdown(3_900), "1:05");
-        assert_eq!(countdown(90_000), "1d 1h");
+        let en = Language::En;
+        assert_eq!(countdown(-5, en), "0:00");
+        assert_eq!(countdown(65, en), "1:05");
+        assert_eq!(countdown(3_900, en), "1:05");
+        assert_eq!(countdown(90_000, en), "1d 1h");
+        assert_eq!(countdown(90_000, Language::De), "1T 1h");
     }
 
     #[test]

@@ -104,10 +104,23 @@ impl App {
         &self.profile
     }
 
-    /// The layout for this board's screen.
+    /// The screen as it is used now: the profile, turned by the
+    /// `orientation` setting where the board allows it.
+    #[must_use]
+    pub const fn screen(&self) -> Profile {
+        self.profile.oriented(self.settings.orientation)
+    }
+
+    /// The language the displays use.
+    #[must_use]
+    pub const fn lang(&self) -> crate::i18n::Language {
+        self.settings.language
+    }
+
+    /// The layout for the screen as it is used now.
     #[must_use]
     pub const fn layout(&self) -> Layout {
-        Layout::for_profile(&self.profile)
+        Layout::for_profile(&self.screen())
     }
 
     #[must_use]

@@ -426,7 +426,8 @@ fn run_frame(shared: &Shared) {
     };
     let mut display = SimulatorDisplay::<Rgb565>::new(size);
     let mut window = Window::new("Herald e-paper", &output_settings());
-    let mut present = FramePresenter::new(size.height as usize);
+    // Enough rows for one pass in either orientation.
+    let mut present = FramePresenter::new(size.width.max(size.height) as usize);
     let mut next_render = Instant::now();
     loop {
         let env = shared.env();
@@ -448,6 +449,12 @@ fn run_frame(shared: &Shared) {
                         "partial"
                     }
                 );
+                let frame_size = Size::new(frame.width() as u32, frame.height() as u32);
+                if frame_size != display.size() {
+                    // Turned: a window of the new shape.
+                    display = SimulatorDisplay::new(frame_size);
+                    window = Window::new("Herald e-paper", &output_settings());
+                }
                 show_frame(&mut display, &frame);
                 shared
                     .app
@@ -681,7 +688,6 @@ impl MqttConnection {
 fn run_mqtt(shared: Arc<Shared>) {
     thread::spawn(move || {
         let mut current: Option<MqttConnection> = None;
-        let mut publisher = ui::mqtt::StatePublisher::default();
         loop {
             let wanted = ui::mqtt::Config::from_settings(
                 shared
@@ -695,7 +701,6 @@ fn run_mqtt(shared: Arc<Shared>) {
                     old.close();
                 }
                 current = wanted.map(|config| MqttConnection::open(&shared, config));
-                publisher.reset();
             }
             let connected = current
                 .as_ref()
@@ -715,21 +720,6 @@ fn run_mqtt(shared: Arc<Shared>) {
                 for line in ui::logbuf::take_pending() {
                     let _ = c.client.try_publish(c.config.log_topic(), qos, false, line);
                 }
-                let env = shared.env();
-                let payload = publisher.due(
-                    &shared.app.lock().unwrap_or_else(PoisonError::into_inner),
-                    &env,
-                );
-                if let Some(payload) = payload {
-                    let _ = c.client.try_publish(
-                        c.config.state_topic(),
-                        rumqttc::QoS::AtMostOnce,
-                        true,
-                        payload,
-                    );
-                }
-            } else {
-                publisher.reset();
             }
             thread::sleep(Duration::from_secs(1));
         }
@@ -832,6 +822,33 @@ fn epaper_screenshots(dir: &Path, env: &mut Env) -> Result<usize, String> {
     env.net = setup_net();
     run(app, env, 60, None);
     shot(app, env, "setup")?;
+
+    // Landscape: the wide layout.
+    post(app, env, "/api/settings", r#"{"orientation":"landscape"}"#)?;
+    let size = app.layout().area().size;
+    let mut display = SimulatorDisplay::<Rgb565>::new(size);
+    let mut present = FramePresenter::new(size.width as usize);
+    let mut shot = |app: &App, env: &Env, name: &str| -> Result<(), String> {
+        show_frame(&mut display, &present.render(app, env));
+        count += 1;
+        let file = dir.join(format!("epaper-{count:02}-wide-{name}.png"));
+        display
+            .to_rgb_output_image(&output_settings())
+            .save_png(&file)
+            .map_err(|e| format!("{}: {e}", file.display()))
+    };
+    shot(app, env, "setup")?;
+    env.net = connected_net();
+    run(app, env, 60, None);
+    post(app, env, "/api/view", r#"{"view":"home"}"#)?;
+    shot(app, env, "dashboard")?;
+    for (name, _) in DEMO_SCREENS {
+        post(app, env, "/api/view", &format!(r#"{{"view":"{name}"}}"#))?;
+        shot(app, env, &format!("screen-{name}"))?;
+    }
+    post(app, env, "/api/settings", r#"{"language":"de"}"#)?;
+    post(app, env, "/api/view", r#"{"view":"home"}"#)?;
+    shot(app, env, "de-dashboard")?;
     Ok(count)
 }
 
@@ -974,6 +991,13 @@ fn screenshots(dir: &Path) -> Result<(), String> {
         run(&mut app, &mut env, 1500, None);
         shot(&mut app, &env, &format!("light-{name}"))?;
     }
+    post(&mut app, &env, "/api/settings", r#"{"language":"de"}"#)?;
+    for name in ["home", "forecast", "calendar"] {
+        view(&mut app, &env, name)?;
+        run(&mut app, &mut env, 1500, None);
+        shot(&mut app, &env, &format!("de-{name}"))?;
+    }
+    post(&mut app, &env, "/api/settings", r#"{"language":"en"}"#)?;
 
     env.net = setup_net();
     run(&mut app, &mut env, 60, None);

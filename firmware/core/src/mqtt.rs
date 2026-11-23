@@ -14,7 +14,7 @@ use anyhow::Result;
 use esp_idf_svc::mqtt::client::{
     Details, EspMqttClient, EventPayload, LwtConfiguration, MqttClientConfiguration, QoS,
 };
-use ui::mqtt::{Config, Message, OFFLINE, ONLINE, StatePublisher, error_payload};
+use ui::mqtt::{Config, Message, OFFLINE, ONLINE, error_payload};
 
 use crate::shared::Shared;
 
@@ -38,7 +38,6 @@ struct Running {
     /// callback cannot publish itself.
     errors: Arc<Mutex<Vec<String>>>,
     subscribed: bool,
-    publisher: StatePublisher,
 }
 
 impl MqttLink {
@@ -76,7 +75,11 @@ impl MqttLink {
                 Ok(()) => {
                     log::info!("MQTT connected to {}", r.config.url());
                     r.subscribed = true;
-                    r.publisher.reset();
+                    // Older versions kept their state there, retained.
+                    let topic = r.config.old_state_topic();
+                    if let Err(e) = r.client.enqueue(&topic, QoS::AtLeastOnce, true, &[]) {
+                        log::warn!("MQTT clearing {topic} failed: {e}");
+                    }
                 }
                 Err(e) => log::warn!("MQTT subscribe failed: {e:#}"),
             }
@@ -113,17 +116,6 @@ impl MqttLink {
                 .enqueue(&topic, QoS::AtMostOnce, false, report.as_bytes())
             {
                 log::warn!("MQTT error report failed: {e}");
-            }
-        }
-        let env = shared.env();
-        let payload = r.publisher.due(&shared.app(), &env);
-        if let Some(payload) = payload {
-            let topic = r.config.state_topic();
-            if let Err(e) = r
-                .client
-                .enqueue(&topic, QoS::AtMostOnce, true, payload.as_bytes())
-            {
-                log::warn!("MQTT publish failed: {e}");
             }
         }
     }
@@ -227,7 +219,6 @@ impl Running {
             connected,
             errors,
             subscribed: false,
-            publisher: StatePublisher::default(),
         })
     }
 

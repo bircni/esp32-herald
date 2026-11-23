@@ -17,17 +17,21 @@ The two existing boards are the examples to copy from:
 Add a constant to `ui::Profile` (`crates/ui/src/profile.rs`) and to
 `Profile::ALL`: the name (the crate's folder name), the upright screen size,
 and what the board has (colour, touch, buttons, backlight, LED, speaker,
-whether it keeps whole frames). The web app hides controls the board cannot
-use, and the simulator can run it with `--board <name>`.
+whether it keeps whole frames, and with `rotatable` whether its screen can
+be used both ways round, which adds an Orientation choice to the web app).
+The web app hides controls the board cannot use, and the simulator can run
+it with `--board <name>`.
 
 ## 2. Layout, only for a new screen size
 
-`ui::layout::Layout::for_profile` picks the layout from the size: wider than
-tall gets the landscape layout (480x320), taller than wide the portrait one
-(272x792). A board of either size needs nothing here.
+`ui::layout::Layout::for_profile` picks the layout from the size as the
+screen is used: taller than wide gets the portrait layout (272x792), low and
+wide (under 300 pixels high) the wide one (792x272), the rest the landscape
+one (480x320). A board of one of these sizes needs nothing here.
 
 For another size, add a variant to `Layout` and a module next to
-`landscape.rs` and `portrait.rs` that paints it (`paint`), says which pages
+`landscape.rs`, `portrait.rs` and `wide.rs` (the e-paper layouts share
+their blocks in `paper.rs`) that paints it (`paint`), says which pages
 `Next`/`Previous` step through (`pages`) and, for region redraws, which
 regions can change (`regions`). Custom screens lay themselves out in any
 area (`views::custom::Area`). Extend `tests/redraw.rs` with the new size.

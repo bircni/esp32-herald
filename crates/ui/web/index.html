@@ -50,7 +50,7 @@ main{padding:28px 36px 120px;max-width:1000px;width:100%}
 .screen{position:relative;aspect-ratio:3/2;overflow:hidden;border-radius:4px;cursor:pointer;touch-action:pan-y;user-select:none;-webkit-user-select:none}
 .dev{position:absolute;left:0;top:0;width:480px;height:320px;transform-origin:0 0;font-family:"Helvetica Neue",Helvetica,Arial,sans-serif;overflow:hidden}
 .dev>*{position:absolute}
-body.no-backlight .needs-backlight,body.mono .needs-color,body.no-touch .needs-touch,body:not(.no-touch) .no-touch-only,body:not(.frame) .needs-frame{display:none}
+body.no-backlight .needs-backlight,body.mono .needs-color,body.no-touch .needs-touch,body:not(.no-touch) .no-touch-only,body:not(.frame) .needs-frame,body:not(.rotatable) .needs-rotate{display:none}
 .screen.framed{margin:0 auto;cursor:default;background:#fff}
 .screen.framed img{display:block;width:100%;height:100%;image-rendering:pixelated}
 .sleep{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.7);color:#cfd4da;font-size:14px;pointer-events:none}
@@ -207,6 +207,8 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
     <div class="head"><h1>Display</h1></div>
     <h2>Look</h2>
     <div class="form">
+      <div class="field needs-rotate"><label for="d-orient">Orientation</label><select id="d-orient" data-key="orientation"><option value="default">As the board comes</option><option value="upright">Upright</option><option value="landscape">Landscape</option></select></div>
+      <div class="field"><label for="d-lang">Display language</label><select id="d-lang" data-key="language"><option value="en">English</option><option value="de">Deutsch</option></select></div>
       <div class="field"><label for="d-theme">Theme</label><select id="d-theme" data-key="theme"><option value="dark">Dark</option><option value="light">Light</option></select></div>
       <label class="check"><input type="checkbox" id="d-flip" data-key="upside_down" data-type="bool"> Upside down, for a board standing the other way round</label>
       <div class="field needs-color"><label for="d-accent">Accent colour</label><input type="color" id="d-accent" data-key="accent_color" data-type="color"></div>
@@ -476,7 +478,7 @@ document.querySelectorAll(".screen").forEach(s=>ro.observe(s));
 function render(){
   if(!S)return;
   const dv=S.device||{},cl=document.body.classList;
-  cl.toggle("no-touch",dv.touch===false);cl.toggle("no-backlight",dv.backlight===false);cl.toggle("mono",dv.color===false);cl.toggle("frame",!!(dv.frame&&S.frame));
+  cl.toggle("no-touch",dv.touch===false);cl.toggle("no-backlight",dv.backlight===false);cl.toggle("mono",dv.color===false);cl.toggle("frame",!!(dv.frame&&S.frame));cl.toggle("rotatable",!!dv.rotatable);
   const setup=S.net&&S.net.state==="setup";
   $("setup").hidden=!setup;$("shell").hidden=setup;if(setup)return;
   const a=accent(),rgb=parseInt(a.slice(1),16),lum=((rgb>>16)*299+((rgb>>8)&255)*587+(rgb&255)*114)/1000,root=document.documentElement.style;

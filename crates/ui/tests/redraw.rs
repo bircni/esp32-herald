@@ -357,6 +357,13 @@ fn incremental_redraw_matches_full_redraw() {
         r.post("/api/view", &format!(r#"{{"view":"{view}"}}"#));
         r.run(view, 300, None);
     }
+    // German: every text changes width.
+    r.post("/api/settings", r#"{"language":"de"}"#);
+    for view in ["home", "forecast", "calendar"] {
+        r.post("/api/view", &format!(r#"{{"view":"{view}"}}"#));
+        r.run(view, 300, None);
+    }
+    r.post("/api/settings", r#"{"language":"en"}"#);
 
     // Rotation through every view.
     r.post("/api/settings", r#"{"rotate":true,"rotate_secs":5}"#);
@@ -390,7 +397,7 @@ fn incremental_redraw_matches_full_redraw() {
 }
 
 #[test]
-fn portrait_bands_match_one_pass() {
+fn e_paper_bands_match_one_pass() {
     let mut r = Rig::new(Profile::CROWPANEL_579);
     r.check("first frame");
     r.run("idle", 2_000, None);
@@ -417,11 +424,25 @@ fn portrait_bands_match_one_pass() {
     r.request("DELETE", "/api/weather", "");
     r.post("/api/view", r#"{"view":"home"}"#);
     r.run("no weather", 300, None);
+    r.post("/api/settings", r#"{"language":"de"}"#);
+    r.run("german", 300, None);
+    // The same board in landscape: the wide layout.
+    r.post("/api/settings", r#"{"orientation":"landscape"}"#);
+    r.run("wide, no weather", 300, None);
+    r.put("/api/weather", FORECAST);
+    r.run("wide dashboard", 61_000, None);
+    for name in ["all", "extras"] {
+        r.post("/api/view", &format!(r#"{{"view":"{name}"}}"#));
+        r.run(name, 300, None);
+    }
+    r.post("/api/view", r#"{"view":"home"}"#);
     r.env.net = NetState::Setup {
         ssid: "Herald-1234".into(),
         password: "secret12".into(),
         ip: "192.168.71.1".into(),
     };
+    r.run("wide setup", 300, None);
+    r.post("/api/settings", r#"{"orientation":"upright"}"#);
     r.run("setup", 300, None);
     assert!(r.checks > 100);
 }

@@ -74,6 +74,28 @@ where
     opt_number::<D, f64>(d).map(|v| v.map(|v| v as f32))
 }
 
+/// An optional whole number that may come with a fraction (Home Assistant
+/// sends Unix times like `1795440418.34`), as a number or a string; the
+/// fraction is dropped.
+///
+/// # Errors
+/// When the value is not a finite number or does not fit `T`.
+pub fn opt_whole<'de, D, T>(d: D) -> Result<Option<T>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: TryFrom<i64>,
+{
+    let Some(v) = opt_number::<D, f64>(d)? else {
+        return Ok(None);
+    };
+    if !v.is_finite() {
+        return Err(D::Error::custom(format!("not a number: {v}")));
+    }
+    T::try_from(v.floor() as i64)
+        .map(Some)
+        .map_err(|_| D::Error::custom(format!("out of range: {v}")))
+}
+
 /// A list of numbers, each also accepted as a string.
 ///
 /// # Errors

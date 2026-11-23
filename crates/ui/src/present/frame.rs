@@ -207,6 +207,9 @@ impl FramePresenter {
         // A new page changes most of the screen; partial refreshes leave
         // a visible trace of it.
         let mostly_new = self.shown.as_ref().is_none_or(|old| {
+            if (old.width, old.height) != (frame.width, frame.height) {
+                return true;
+            }
             let changed = old
                 .bits
                 .iter()

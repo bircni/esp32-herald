@@ -133,7 +133,8 @@ qemu-system-xtensa -nographic -machine esp32 \
 
 - **A profile, a layout, a presenter.** A board describes itself with a
   `ui::Profile` (size, colour, touch, buttons, backlight, ...). The size picks
-  a `ui::layout::Layout` (landscape 480x320, portrait 272x792), and the board
+  a `ui::layout::Layout` (landscape 480x320, portrait 272x792, wide 792x272;
+  rotatable screens turn with the `orientation` setting), and the board
   shows it with one of two `ui::present` presenters. Input of every kind
   becomes a `ui::Action`.
 - **No frame buffer on the TFT.** 480x320 at 16 bit is 307 KB, more than the

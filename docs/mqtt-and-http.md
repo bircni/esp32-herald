@@ -21,8 +21,6 @@ alongside; both go through the same `Transport` trait
 
 The device publishes:
 
-- `<prefix>/state`: retained, the same JSON as `GET /api/state`, on changes
-  and at least once a minute;
 - `<prefix>/status`: `online`, retained; `offline` as last will;
 - `<prefix>/error`: when a message is rejected, `{topic, status, error,
   payload}`, so the sender can see why (`mosquitto_sub -t '<prefix>/error'`);
@@ -36,13 +34,14 @@ The HTTP token does not apply to MQTT; the broker's login does.
 - `text`: required (or send plain text as the whole payload), up to 64
   characters. Long texts are drawn smaller on the TFT and wrap onto a
   second line on the e-paper.
-- `color`: `red`, `yellow`, `blue` (default), `green`, `grey`, or any
-  `#RRGGBB` / `[r,g,b]`, mapped to the nearest of these. Items are listed in
+- `color`: `red`, `yellow` (or `orange`), `blue` (default), `green`, `grey`
+  (or `off`), or any `#RRGGBB` / `[r,g,b]`, mapped to the nearest of these. Items are listed in
   that order; a red or yellow item at the top lights the LED.
 - `icon`: one of the icons above, drawn instead of the colour dot.
 - `detail`: up to 12 characters on the right; without it, how long the item
   has been in its state (`now`, `12m`, `1h 05m`, `2d 3h`).
 - `since` (Unix time the state began) or `age` (seconds): sets that age.
+  Fractions (`1795440418.34`, as Home Assistant sends them) are dropped.
   Prefer `since` for retained messages, which may arrive much later; a
   `since` before 2001 is rejected as a mistake.
 - `ttl`: seconds until the item removes itself (at most a week).
