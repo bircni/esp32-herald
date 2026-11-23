@@ -1,12 +1,10 @@
 //! The application: owns all state, reacts to touch and API calls, and
 //! repaints only the screen regions whose content changed.
 
-use embedded_graphics::{pixelcolor::Rgb565, prelude::*, primitives::Rectangle};
-
 use crate::{
     action::Action,
     feed::{Feed, Item},
-    gfx::{self, Canvas},
+    layout::Layout,
     model::{
         ALL_SCREENS, Beep, Calibration, Effect, Env, ItemColor, Led, NetState, RawTouch, Settings,
         ViewId,
@@ -15,7 +13,7 @@ use crate::{
     screen::{Screen, Screens},
     theme::Theme,
     touch::{Fed, Touch},
-    views::{self, Region},
+    views,
     weather::{self, Weather},
 };
 
@@ -64,10 +62,7 @@ pub struct App {
     effects: Vec<Effect>,
     /// On e-paper boards: the picture the panel shows and a counter that
     /// changes with it, for the web app.
-    pub(crate) shown_frame: Option<(u64, crate::epaper::Frame)>,
-    buf: Vec<Rgb565>,
-    cache: Vec<u64>,
-    cache_screen: Option<(Showing, i64)>,
+    pub(crate) shown_frame: Option<(u64, crate::present::Frame)>,
 }
 
 impl App {
@@ -98,9 +93,6 @@ impl App {
             refresh_requested: false,
             effects: Vec::new(),
             shown_frame: None,
-            buf: vec![Rgb565::BLACK; gfx::BAND_PIXELS],
-            cache: Vec::new(),
-            cache_screen: None,
         }
     }
 
@@ -110,6 +102,12 @@ impl App {
     #[must_use]
     pub const fn profile(&self) -> &Profile {
         &self.profile
+    }
+
+    /// The layout for this board's screen.
+    #[must_use]
+    pub const fn layout(&self) -> Layout {
+        Layout::for_profile(&self.profile)
     }
 
     #[must_use]
@@ -410,9 +408,9 @@ impl App {
         std::mem::replace(&mut self.refresh_requested, false)
     }
 
-    /// The on-screen menu belongs to the touch layout.
+    /// Only touch boards with a layout that has one open the menu.
     const fn has_menu(&self) -> bool {
-        self.touch.is_some()
+        self.touch.is_some() && self.layout().has_menu()
     }
 
     pub(crate) const fn calibrating(&self) -> bool {
@@ -510,19 +508,8 @@ impl App {
         }
     }
 
-    /// The pages `Next` and `Previous` step through, and the current one:
-    /// the views on the landscape layout, the dashboard and custom screens
-    /// on the tall one.
-    fn pages(&self) -> (Vec<ViewId>, ViewId) {
-        if self.profile.height > self.profile.width {
-            (crate::epaper::pages(self), crate::epaper::page(self))
-        } else {
-            (self.nav_order(), self.view)
-        }
-    }
-
     fn step_view(&mut self, forward: bool, now_ms: u64) {
-        let (order, current) = self.pages();
+        let (order, current) = self.layout().pages(self);
         let i = order.iter().position(|v| *v == current).unwrap_or(0);
         let n = order.len();
         let next = if forward {
@@ -539,108 +526,13 @@ impl App {
             touch.start_calibration();
         }
     }
-
-    // ---------------------------------------------------------------- draw
-
-    /// Position of the current view in swipe order, and how many there are.
-    fn nav_position(&self) -> (usize, usize) {
-        let order = self.nav_order();
-        let i = order.iter().position(|v| *v == self.view).unwrap_or(0);
-        (i, order.len())
-    }
-
-    fn regions(&self, showing: Showing, env: &Env) -> Vec<Region> {
-        match showing {
-            Showing::Calibrate => views::setup::calibrate_regions(self),
-            Showing::WifiSetup => views::setup::wifi_regions(env),
-            Showing::Menu => views::menu::regions(self, env),
-            Showing::View(view) => {
-                let mut regions = match view {
-                    ViewId::Home => views::home::regions(self, env),
-                    ViewId::Forecast => views::forecast::regions(self, env),
-                    ViewId::Calendar => views::calendar::regions(self, env),
-                    ViewId::Screen(slot) => views::custom::regions(self, slot, env),
-                };
-                let (i, n) = self.nav_position();
-                regions.push(views::nav_region(i, n));
-                regions
-            }
-        }
-    }
-
-    fn paint(&self, showing: Showing, c: &mut Canvas<'_>, env: &Env, theme: &Theme) {
-        gfx::fill(c, views::area(), theme.bg);
-        match showing {
-            Showing::Calibrate => views::setup::paint_calibrate(self, c, theme),
-            Showing::WifiSetup => views::setup::paint_wifi(c, env, theme),
-            Showing::Menu => views::menu::paint(self, c, env, theme),
-            Showing::View(view) => {
-                match view {
-                    ViewId::Home => views::home::paint(self, c, env, theme),
-                    ViewId::Forecast => views::forecast::paint(self, c, env, theme),
-                    ViewId::Calendar => views::calendar::paint(self, c, env, theme),
-                    ViewId::Screen(slot) => views::custom::paint(self, slot, c, env, theme),
-                }
-                let (i, n) = self.nav_position();
-                views::paint_nav(c, i, n, theme);
-            }
-        }
-    }
-
-    /// Makes the next [`App::draw`] repaint the whole screen, e.g. after the
-    /// display was re-initialised.
-    pub const fn invalidate(&mut self) {
-        self.cache_screen = None;
-    }
-
-    /// Repaints whatever changed since the last call. The first call, a
-    /// change of screen and a change of theme repaint everything.
-    ///
-    /// # Errors
-    /// When the display fails; the next call repaints what is missing.
-    pub fn draw<D>(&mut self, display: &mut D, env: &Env) -> Result<(), D::Error>
-    where
-        D: DrawTarget<Color = Rgb565>,
-    {
-        if self.asleep {
-            return Ok(());
-        }
-        if self.take_refresh() {
-            self.invalidate();
-        }
-        let showing = self.showing(env);
-        let theme = self.theme();
-        let regions = self.regions(showing, env);
-        let cache_id = Some((showing, theme.key()));
-        let full = self.cache_screen != cache_id || self.cache.len() != regions.len();
-
-        let mut buf = std::mem::take(&mut self.buf);
-        let mut paint = |rect: Rectangle| {
-            gfx::render(display, &mut buf, rect, |c| {
-                self.paint(showing, c, env, &theme);
-            })
-        };
-        let result = if full {
-            paint(views::area())
-        } else {
-            regions
-                .iter()
-                .zip(&self.cache)
-                .filter(|(region, cached)| region.key != **cached)
-                .try_for_each(|(region, _)| paint(region.rect))
-        };
-        self.buf = buf;
-        result?;
-        self.cache = regions.iter().map(|r| r.key).collect();
-        self.cache_screen = cache_id;
-        Ok(())
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::model::LocalTime;
+    use embedded_graphics::prelude::Point;
 
     fn env_at(now_ms: u64, hour: u8) -> Env {
         Env {

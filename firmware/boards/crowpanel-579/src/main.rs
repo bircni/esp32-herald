@@ -23,7 +23,8 @@ use esp_idf_svc::hal::{
 use herald_esp::Shared;
 use ui::{
     Action, App, Env, Profile,
-    epaper::{self, Refresher, Renderer},
+    layout::portrait,
+    present::{FramePresenter, panel},
 };
 
 use crate::{buttons::Buttons, epd::Epd};
@@ -72,9 +73,7 @@ fn main() -> Result<()> {
         epd,
         buttons,
         // The whole picture in one pass; the buffer goes to PSRAM.
-        renderer: Renderer::new(epaper::H as usize),
-        refresher: Refresher::default(),
-        upside_down: false,
+        present: FramePresenter::new(portrait::H as usize),
         next_render: Instant::now(),
     };
     herald_esp::run(board, p.modem, start)
@@ -83,10 +82,7 @@ fn main() -> Result<()> {
 struct CrowPanel {
     epd: Epd<'static>,
     buttons: Buttons<'static>,
-    renderer: Renderer,
-    refresher: Refresher,
-    /// How the panel shows the picture now.
-    upside_down: bool,
+    present: FramePresenter,
     next_render: Instant,
 }
 
@@ -109,26 +105,20 @@ impl herald_esp::Board for CrowPanel {
             return;
         }
         self.next_render = Instant::now() + RENDER_INTERVAL;
-        let (frame, flip) = {
+        let (next, upside_down) = {
             let mut app = shared.app();
-            if app.take_refresh() {
-                self.refresher.force_full();
-            }
-            (self.renderer.render(&app, env), app.settings().upside_down)
+            let next = self.present.next(&mut app, env);
+            (next, app.settings().upside_down)
         };
-        // The upright picture stays the same when it is turned.
-        if flip != self.upside_down {
-            self.upside_down = flip;
-            self.refresher.force_full();
-        }
-        let Some(refresh) = self.refresher.next(&frame) else {
+        let Some((frame, refresh)) = next else {
             return;
         };
-        match self.epd.show(&frame.to_panel(self.upside_down), refresh) {
+        let memory = panel::ssd1683_cascade(&frame, upside_down);
+        match self.epd.show(&memory, refresh) {
             Ok(()) => shared.app().set_shown_frame(frame),
             Err(e) => {
                 log::warn!("e-paper: {e:#}");
-                self.refresher.force_full();
+                self.present.force_full();
             }
         }
     }

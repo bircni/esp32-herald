@@ -67,6 +67,31 @@ impl Theme {
         }
     }
 
+    /// For black-and-white displays: black on white, or white on black.
+    /// The one grey (gauge tracks) becomes a dot pattern.
+    #[must_use]
+    pub const fn mono(dark: bool) -> Self {
+        let (bg, fg) = if dark {
+            (Rgb565::BLACK, Rgb565::WHITE)
+        } else {
+            (Rgb565::WHITE, Rgb565::BLACK)
+        };
+        Self {
+            bg,
+            fg,
+            dim: fg,
+            panel: bg,
+            rule: Rgb565::new(20, 40, 20),
+            accent: fg,
+            on_accent: bg,
+            good: fg,
+            warn: fg,
+            caution: fg,
+            info: fg,
+            grey: fg,
+        }
+    }
+
     #[must_use]
     pub const fn item(&self, color: ItemColor) -> Rgb565 {
         match color {

@@ -34,7 +34,7 @@ use embedded_graphics_simulator::{
 use ui::{
     Action, App, Calibration, Effect, Env, Led, LocalTime, NetState, Profile, RawTouch, Settings,
     api,
-    epaper::{self, Refresh, Refresher, Renderer},
+    present::{Frame, FramePresenter, Refresh, RegionPresenter},
 };
 
 /// Prints a line like the firmware's log and keeps it for `/api/log`.
@@ -347,13 +347,15 @@ fn to_raw(p: Point, fake_adc: bool) -> RawTouch {
 /// The app loop without a window: ticks and draws off-screen.
 fn run_headless(shared: &Shared) {
     let mut display = SimulatorDisplay::<Rgb565>::new(ui::views::area().size);
+    let mut present = RegionPresenter::default();
     loop {
         let env = shared.env();
         {
             let mut app = shared.app.lock().unwrap_or_else(PoisonError::into_inner);
             app.tick(&env);
             shared.apply_effects(&mut app);
-            let Ok(()) = app.draw(&mut display, &env);
+            let Ok(()) = present.draw(&mut app, &mut display, &env);
+            drop(app);
         }
         thread::sleep(TICK);
     }
@@ -370,6 +372,7 @@ fn run_window(shared: &Shared, fake_adc: bool) {
     let mut window = Window::new("Herald simulator", &output_settings());
     let mut touch: Option<Point> = None;
     let mut led = Led::Off;
+    let mut present = RegionPresenter::default();
 
     loop {
         let frame_start = Instant::now();
@@ -380,7 +383,7 @@ fn run_window(shared: &Shared, fake_adc: bool) {
             app.touch(raw, &env);
             app.tick(&env);
             shared.apply_effects(&mut app);
-            let Ok(()) = app.draw(&mut display, &env);
+            let Ok(()) = present.draw(&mut app, &mut display, &env);
             let now_led = app.led();
             if now_led != led {
                 led = now_led;
@@ -417,27 +420,26 @@ fn run_window(shared: &Shared, fake_adc: bool) {
     reason = "of the window events only a few keys and quitting matter"
 )]
 fn run_frame(shared: &Shared) {
-    let mut display =
-        SimulatorDisplay::<Rgb565>::new(Size::new(epaper::W as u32, epaper::H as u32));
+    let size = {
+        let app = shared.app.lock().unwrap_or_else(PoisonError::into_inner);
+        app.layout().area().size
+    };
+    let mut display = SimulatorDisplay::<Rgb565>::new(size);
     let mut window = Window::new("Herald e-paper", &output_settings());
-    let mut renderer = Renderer::new(epaper::H as usize);
-    let mut refresher = Refresher::default();
+    let mut present = FramePresenter::new(size.height as usize);
     let mut next_render = Instant::now();
     loop {
         let env = shared.env();
         if Instant::now() >= next_render {
-            let frame = {
+            let next = {
                 let mut app = shared.app.lock().unwrap_or_else(PoisonError::into_inner);
                 app.tick(&env);
                 shared.apply_effects(&mut app);
-                if app.take_refresh() {
-                    refresher.force_full();
-                }
-                let frame = renderer.render(&app, &env);
+                let next = present.next(&mut app, &env);
                 drop(app);
-                frame
+                next
             };
-            if let Some(kind) = refresher.next(&frame) {
+            if let Some((frame, kind)) = next {
                 say!(
                     "[epaper] {} refresh",
                     if kind == Refresh::Full {
@@ -485,9 +487,9 @@ fn run_frame(shared: &Shared) {
     }
 }
 
-fn show_frame(display: &mut SimulatorDisplay<Rgb565>, frame: &epaper::Frame) {
-    for y in 0..epaper::H {
-        for x in 0..epaper::W {
+fn show_frame(display: &mut SimulatorDisplay<Rgb565>, frame: &Frame) {
+    for y in 0..frame.height() {
+        for x in 0..frame.width() {
             let color = if frame.black(x, y) {
                 Rgb565::new(4, 8, 4)
             } else {
@@ -788,12 +790,12 @@ fn epaper_screenshots(dir: &Path, env: &mut Env) -> Result<usize, String> {
         ..Settings::default()
     };
     let app = &mut App::new(Profile::CROWPANEL_579, settings, None);
-    let mut display =
-        SimulatorDisplay::<Rgb565>::new(Size::new(epaper::W as u32, epaper::H as u32));
-    let mut renderer = Renderer::new(epaper::H as usize);
+    let size = app.layout().area().size;
+    let mut display = SimulatorDisplay::<Rgb565>::new(size);
+    let mut present = FramePresenter::new(size.height as usize);
     let mut count = 0;
     let mut shot = |app: &App, env: &Env, name: &str| -> Result<(), String> {
-        show_frame(&mut display, &renderer.render(app, env));
+        show_frame(&mut display, &present.render(app, env));
         count += 1;
         let file = dir.join(format!("epaper-{count:02}-{name}.png"));
         display
@@ -870,8 +872,9 @@ fn screenshots(dir: &Path) -> Result<(), String> {
         ..Env::default()
     };
     let mut count = 0;
+    let mut present = RegionPresenter::default();
     let mut shot = |app: &mut App, env: &Env, name: &str| -> Result<(), String> {
-        let Ok(()) = app.draw(&mut display, env);
+        let Ok(()) = present.draw(app, &mut display, env);
         count += 1;
         let file = dir.join(format!("{count:02}-{name}.png"));
         display

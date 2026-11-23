@@ -127,10 +127,19 @@ qemu-system-xtensa -nographic -machine esp32 \
 
 ## Design notes
 
-- **No frame buffer.** 480x320 at 16 bit is 307 KB, more than the board can
-  spare next to WiFi. Each view declares the regions that can change and a key
-  describing their content; only regions whose key changed are repainted,
-  through a 32 KB band buffer.
+- **A profile, a layout, a presenter.** A board describes itself with a
+  `ui::Profile` (size, colour, touch, buttons, backlight, ...). The size picks
+  a `ui::layout::Layout` (landscape 480x320, portrait 272x792), and the board
+  shows it with one of two `ui::present` presenters. Input of every kind
+  becomes a `ui::Action`.
+- **No frame buffer on the TFT.** 480x320 at 16 bit is 307 KB, more than the
+  ESP32 can spare next to WiFi. Each view declares the regions that can
+  change and a key describing their content; the region presenter repaints
+  only regions whose key changed, through a 32 KB band buffer.
+- **Whole frames on e-paper.** The frame presenter draws the whole picture
+  (into PSRAM), dithers it to black and white, and compares it with what the
+  panel shows: unchanged frames cost nothing, small changes are partial
+  refreshes, new pages and every 30th change full ones.
 - **The browser does the work.** The web app is one gzipped page served with
   an `ETag`; it draws the mirror and previews from JSON, and polls a state that
   answers `304` when nothing changed. The device mostly answers small JSON.

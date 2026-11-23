@@ -13,7 +13,10 @@ use esp_idf_svc::hal::{
     gpio::{Input, Output, PinDriver},
     spi::{SpiDeviceDriver, SpiDriver},
 };
-use ui::epaper::{PANEL_ROW_BYTES, PANEL_ROWS, Refresh};
+use ui::present::{
+    Refresh,
+    panel::{SSD1683_CASCADE_ROW_BYTES as PANEL_ROW_BYTES, SSD1683_CASCADE_ROWS as PANEL_ROWS},
+};
 
 const SECOND: u8 = 0x80;
 
@@ -135,7 +138,7 @@ impl<'d> Epd<'d> {
         Ok(())
     }
 
-    /// Shows `frame`, laid out as [`ui::epaper::Frame::to_panel`] returns
+    /// Shows `frame`, laid out as [`ui::present::panel::ssd1683_cascade`] returns
     /// it. Blocks until the panel is done (about 0.6 s partial, 3 s full).
     pub fn show(&mut self, frame: &[u8], refresh: Refresh) -> Result<()> {
         let full = refresh == Refresh::Full || self.shown.is_none();

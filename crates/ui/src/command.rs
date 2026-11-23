@@ -553,7 +553,7 @@ mod tests {
             ),
             (Some(272), Some(false))
         );
-        let frame = crate::epaper::Renderer::new(50).render(&paper, &env);
+        let frame = crate::present::FramePresenter::new(50).render(&paper, &env);
         paper.set_shown_frame(frame);
         assert_eq!(state(&paper, &env)["frame"], "1");
     }

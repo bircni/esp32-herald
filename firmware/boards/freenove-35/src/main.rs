@@ -25,7 +25,7 @@ use mipidsi::{
     models::ST7796,
     options::{ColorInversion, ColorOrder, Orientation, Rotation},
 };
-use ui::{App, Env, Profile};
+use ui::{App, Env, Profile, present::RegionPresenter};
 
 use crate::{
     outputs::{Backlight, RgbLed, Speaker},
@@ -111,6 +111,7 @@ fn main() -> Result<()> {
 
     let board = Freenove {
         display,
+        present: RegionPresenter::default(),
         upside_down: false,
         touch: Touch::new(touch_spi),
         backlight,
@@ -154,6 +155,7 @@ fn pwm_outputs(
 
 struct Freenove {
     display: Lcd,
+    present: RegionPresenter,
     /// How the panel is turned now.
     upside_down: bool,
     touch: Touch<'static>,
@@ -185,11 +187,13 @@ impl herald_esp::Board for Freenove {
                 Ok(()) => self.upside_down = upside_down,
                 Err(e) => log::warn!("display: {e:?}"),
             }
-            app.invalidate();
+            self.present.invalidate();
         }
-        if let Err(e) = app.draw(&mut self.display, env) {
+        let result = self.present.draw(&mut app, &mut self.display, env);
+        drop(app);
+        if let Err(e) = result {
             log::warn!("display: {e:?}");
-            app.invalidate();
+            self.present.invalidate();
         }
     }
 

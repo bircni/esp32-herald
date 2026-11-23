@@ -1,12 +1,17 @@
-//! The UI repaints only the regions it believes have changed. This test
-//! drives the app through every screen and checks, tick by tick, that the
-//! incrementally updated display is identical to a full repaint. A region
-//! that is too small or keyed on too little shows up here as stale pixels.
+//! The landscape layout repaints only the regions it believes have
+//! changed. This test drives the app through every screen and checks, tick
+//! by tick, that the incrementally updated display is identical to a full
+//! repaint. A region that is too small or keyed on too little shows up here
+//! as stale pixels. The portrait layout is drawn whole, in bands; its test
+//! checks that the bands add up to the same picture as one pass.
 
 use std::convert::Infallible;
 
 use embedded_graphics::{pixelcolor::Rgb565, prelude::*};
-use ui::{App, Env, LocalTime, NetState, RawTouch, Settings, ViewId, api};
+use ui::{
+    App, Env, LocalTime, NetState, Profile, RawTouch, Settings, ViewId, api,
+    present::{FramePresenter, RegionPresenter},
+};
 
 const SCREEN_W: i32 = ui::Profile::FREENOVE_35.width;
 const SCREEN_H: i32 = ui::Profile::FREENOVE_35.height;
@@ -58,14 +63,16 @@ impl DrawTarget for Frame {
 struct Rig {
     app: App,
     env: Env,
+    present: RegionPresenter,
     incremental: Frame,
     checks: usize,
 }
 
 impl Rig {
-    fn new() -> Self {
+    fn new(profile: Profile) -> Self {
         Self {
-            app: App::new(ui::Profile::FREENOVE_35, Settings::default(), None),
+            app: App::new(profile, Settings::default(), None),
+            present: RegionPresenter::default(),
             env: Env {
                 now_ms: 0,
                 local: Some(LocalTime {
@@ -92,10 +99,19 @@ impl Rig {
         if self.app.is_asleep() {
             return; // backlight off, nothing is drawn
         }
-        let Ok(()) = self.app.draw(&mut self.incremental, &self.env);
+        if !self.app.profile().color {
+            // Drawn whole: bands of an odd height must add up to one pass.
+            let banded = FramePresenter::new(37).render(&self.app, &self.env);
+            let whole = FramePresenter::new(1000).render(&self.app, &self.env);
+            assert!(banded == whole, "{what}: bands differ from one pass");
+            self.checks += 1;
+            return;
+        }
+        let Ok(()) = self
+            .present
+            .draw(&mut self.app, &mut self.incremental, &self.env);
         let mut full = Frame::new();
-        self.app.invalidate();
-        let Ok(()) = self.app.draw(&mut full, &self.env);
+        let Ok(()) = RegionPresenter::default().draw(&mut self.app, &mut full, &self.env);
         if let Some((x, y)) = self.incremental.first_difference(&full) {
             panic!(
                 "{what}: stale pixel at ({x}, {y}) at t={} ms",
@@ -189,13 +205,31 @@ impl Rig {
 
 const FORECAST: &str = r#"{"temp":6.4,"condition":"cloudy","is_day":false,"sunrise":"07:38","sunset":"16:05","hourly":[{"hour":17,"temp":6.4,"rain":23,"condition":"cloudy","is_day":false},{"hour":18,"temp":6.2,"rain":40,"condition":"cloudy","is_day":false},{"hour":19,"temp":5.9,"rain":35,"condition":"rainy","is_day":false},{"hour":20,"temp":5.7,"rain":18,"condition":"rainy","is_day":false},{"hour":21,"temp":5.5,"rain":13,"condition":"rainy","is_day":false},{"hour":22,"temp":5.3,"rain":10,"condition":"cloudy","is_day":false},{"hour":23,"temp":5.2,"rain":20,"condition":"cloudy","is_day":false},{"hour":0,"temp":4.9,"rain":33,"condition":"cloudy","is_day":false},{"hour":1,"temp":4.8,"rain":45,"condition":"rainy","is_day":false},{"hour":2,"temp":4.8,"rain":45,"condition":"rainy","is_day":false},{"hour":3,"temp":4.7,"rain":28,"condition":"cloudy","is_day":false},{"hour":4,"temp":4.5,"rain":13,"condition":"partlycloudy","is_day":false}],"daily":[{"date":"2026-11-21","min":0.6,"max":6.7,"condition":"rainy"},{"date":"2026-11-22","min":2.1,"max":4.9,"condition":"rainy"},{"date":"2026-11-23","min":-0.6,"max":3.0,"condition":"snowy"},{"date":"2026-11-24","min":-1.0,"max":1.7,"condition":"cloudy"}]}"#;
 
+const ALL_WIDGETS: &str = r##"{"title":"Everything","widgets":[
+        {"type":"value","label":"Solar","value":3.2,"unit":"kW","color":"yellow"},
+        {"type":"gauge","label":"Battery","value":64,"unit":"%","zones":[{"to":20,"color":"red"},{"to":100,"color":"green"}]},
+        {"type":"chart","label":"Today","values":[0,0.4,1.8,3.2,2.1],"unit":"kW"},
+        {"type":"list","rows":[{"label":"Kitchen","value":21.5,"unit":"°"},{"label":"Bath","value":23}]},
+        {"type":"grid","tiles":[{"label":"CO2","value":812},{"label":"Hum","value":"48%","color":"#3366FF"}]},
+        {"type":"countdown","label":"Train","until":1795334400}
+    ]}"##;
+
+const EXTRA_WIDGETS: &str = r#"{"widgets":[
+        {"type":"value","value":"1234","digits":true},
+        {"type":"gauge","label":"CPU","value":40,"style":"bar"},
+        {"type":"progress","label":"Upload","value":70},
+        {"type":"text","text":"A longer paragraph that has to wrap over a few lines","size":"small"},
+        {"type":"icon","icon":"window","label":"Kitchen","value":"open","color":"red"},
+        {"type":"chart","values":[3,1,4,1,5,9,2,6],"style":"bar"}
+    ]}"#;
+
 #[test]
 #[expect(
     clippy::too_many_lines,
     reason = "one scenario from first boot to sleep"
 )]
 fn incremental_redraw_matches_full_redraw() {
-    let mut r = Rig::new();
+    let mut r = Rig::new(Profile::FREENOVE_35);
     let corners = [(30, 30), (450, 30), (450, 290), (30, 290)];
 
     // First boot: calibration, including one failed attempt.
@@ -267,14 +301,7 @@ fn incremental_redraw_matches_full_redraw() {
 
     // Custom screens: every widget, values changing, layouts switching.
     r.put("/api/weather", FORECAST);
-    let all = r##"{"title":"Everything","widgets":[
-        {"type":"value","label":"Solar","value":3.2,"unit":"kW","color":"yellow"},
-        {"type":"gauge","label":"Battery","value":64,"unit":"%","zones":[{"to":20,"color":"red"},{"to":100,"color":"green"}]},
-        {"type":"chart","label":"Today","values":[0,0.4,1.8,3.2,2.1],"unit":"kW"},
-        {"type":"list","rows":[{"label":"Kitchen","value":21.5,"unit":"°"},{"label":"Bath","value":23}]},
-        {"type":"grid","tiles":[{"label":"CO2","value":812},{"label":"Hum","value":"48%","color":"#3366FF"}]},
-        {"type":"countdown","label":"Train","until":1795334400}
-    ]}"##;
+    let all = ALL_WIDGETS;
     r.put("/api/screens/all", all);
     r.post("/api/view", r#"{"view":"all"}"#);
     r.run("custom screen", 300, None);
@@ -286,14 +313,7 @@ fn incremental_redraw_matches_full_redraw() {
         ),
     );
     r.run("custom screen, new value", 300, None);
-    let extras = r#"{"widgets":[
-        {"type":"value","value":"1234","digits":true},
-        {"type":"gauge","label":"CPU","value":40,"style":"bar"},
-        {"type":"progress","label":"Upload","value":70},
-        {"type":"text","text":"A longer paragraph that has to wrap over a few lines","size":"small"},
-        {"type":"icon","icon":"window","label":"Kitchen","value":"open","color":"red"},
-        {"type":"chart","values":[3,1,4,1,5,9,2,6],"style":"bar"}
-    ]}"#;
+    let extras = EXTRA_WIDGETS;
     r.put("/api/screens/extras", extras);
     r.post("/api/view", r#"{"view":"extras"}"#);
     r.run("custom screen with extras", 300, None);
@@ -367,4 +387,41 @@ fn incremental_redraw_matches_full_redraw() {
     assert_eq!(r.app.view(), ViewId::Home, "wake touch was swallowed");
 
     assert!(r.checks > 2_000, "only {} frames checked", r.checks);
+}
+
+#[test]
+fn portrait_bands_match_one_pass() {
+    let mut r = Rig::new(Profile::CROWPANEL_579);
+    r.check("first frame");
+    r.run("idle", 2_000, None);
+    r.put("/api/weather", FORECAST);
+    r.put(
+        "/api/items/window",
+        r#"{"text":"Kitchen window open","color":"red","age":3540}"#,
+    );
+    r.put(
+        "/api/items/long",
+        r#"{"text":"Basement laundry room garden door unlocked since noon","color":"yellow"}"#,
+    );
+    for i in 0..8 {
+        r.put(&format!("/api/items/n{i}"), r#"{"text":"Another one"}"#);
+    }
+    r.run("full feed", 61_000, None);
+    for (name, screen) in [("all", ALL_WIDGETS), ("extras", EXTRA_WIDGETS)] {
+        r.put(&format!("/api/screens/{name}"), screen);
+        r.post("/api/view", &format!(r#"{{"view":"{name}"}}"#));
+        r.run(name, 300, None);
+    }
+    r.post("/api/settings", r#"{"theme":"light"}"#);
+    r.run("light", 300, None);
+    r.request("DELETE", "/api/weather", "");
+    r.post("/api/view", r#"{"view":"home"}"#);
+    r.run("no weather", 300, None);
+    r.env.net = NetState::Setup {
+        ssid: "Herald-1234".into(),
+        password: "secret12".into(),
+        ip: "192.168.71.1".into(),
+    };
+    r.run("setup", 300, None);
+    assert!(r.checks > 100);
 }
