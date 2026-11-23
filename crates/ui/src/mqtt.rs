@@ -311,7 +311,7 @@ mod tests {
             &mut a,
             0,
             "home/herald/weather",
-            r#"{"temp":4,"condition":"x"}"#,
+            r#"{"temp":400,"condition":"sunny"}"#,
         );
         assert_eq!(bad.unwrap_err().status, 400);
         assert!(a.weather().is_some(), "a bad message keeps the weather");

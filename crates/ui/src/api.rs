@@ -291,6 +291,26 @@ fn state_etag(state: &Value) -> String {
     format!("\"{:016x}\"", gfx::str_key(&stable.to_string()))
 }
 
+/// What an e-paper board shows, as a black-and-white BMP image.
+fn frame_bmp(app: &App, req: &Request<'_>) -> Response {
+    let Some((rev, frame)) = &app.shown_frame else {
+        return Response::json(
+            404,
+            &json!({ "error": "this display has no picture to send" }),
+        );
+    };
+    let etag = format!("\"f{rev}\"");
+    if req.if_none_match == Some(etag.as_str()) {
+        return Response::not_modified(etag);
+    }
+    Response {
+        status: 200,
+        content_type: "image/bmp",
+        headers: vec![("ETag", etag), ("Cache-Control", "no-cache".to_owned())],
+        body: Cow::Owned(frame.to_bmp()),
+    }
+}
+
 /// Handles one HTTP request.
 pub fn handle(app: &mut App, env: &Env, req: &Request<'_>) -> Response {
     let path = req.path.split('?').next().unwrap_or("");
@@ -304,6 +324,9 @@ pub fn handle(app: &mut App, env: &Env, req: &Request<'_>) -> Response {
         if setup && path != "/" && path != "/index.html" && !path.starts_with("/api/") {
             return Response::redirect("/");
         }
+    }
+    if req.method == "GET" && path == "/api/frame.bmp" {
+        return frame_bmp(app, req);
     }
     match command::handle(&Http, app, env, req) {
         Ok(Reply::Asset {

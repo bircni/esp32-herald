@@ -7,7 +7,11 @@
 //! cargo run -p simulator -- --setup           # start in WiFi setup mode
 //! cargo run -p simulator -- --demo            # sample feed items and weather
 //! cargo run -p simulator -- --screenshots DIR # render every screen to PNG, no window
+//! cargo run -p simulator -- --epaper          # the tall e-paper board instead
 //! ```
+//!
+//! With `--epaper` the arrow keys are the rotary switch, Enter presses it,
+//! Escape is the EXIT button and M the MENU button.
 
 use std::{
     fs,
@@ -25,11 +29,12 @@ use chrono::{Datelike, Local, Timelike};
 use embedded_graphics::{pixelcolor::Rgb565, prelude::*};
 use embedded_graphics_simulator::{
     OutputSettings, OutputSettingsBuilder, SimulatorDisplay, SimulatorEvent, Window,
-    sdl2::MouseButton,
+    sdl2::{Keycode, MouseButton},
 };
 use ui::{
     App, Calibration, Effect, Env, Led, LocalTime, NetState, RawTouch, SCREEN_H, SCREEN_W,
     Settings, api,
+    epaper::{self, Button, Refresh, Refresher, Renderer},
 };
 
 /// Prints a line like the firmware's log and keeps it for `/api/log`.
@@ -160,6 +165,8 @@ struct Args {
     demo: bool,
     /// No window: the app runs and draws off-screen, for tests.
     headless: bool,
+    /// The e-paper board's tall black-and-white layout.
+    epaper: bool,
     port: u16,
     screenshots: Option<PathBuf>,
 }
@@ -170,6 +177,7 @@ fn parse_args() -> Result<Args, String> {
         setup: false,
         demo: false,
         headless: false,
+        epaper: false,
         port: 8080,
         screenshots: None,
     };
@@ -180,6 +188,7 @@ fn parse_args() -> Result<Args, String> {
             "--setup" => args.setup = true,
             "--demo" => args.demo = true,
             "--headless" => args.headless = true,
+            "--epaper" => args.epaper = true,
             "--port" => {
                 let value = it.next().ok_or("--port needs a number")?;
                 args.port = value.parse().map_err(|_| format!("bad port: {value}"))?;
@@ -198,7 +207,7 @@ fn main() {
         Ok(a) => a,
         Err(e) => {
             eprintln!(
-                "{e}\nusage: simulator [--calibrate] [--setup] [--demo] [--headless] [--port N] [--screenshots DIR]"
+                "{e}\nusage: simulator [--calibrate] [--setup] [--demo] [--headless] [--epaper] [--port N] [--screenshots DIR]"
             );
             std::process::exit(2);
         }
@@ -244,6 +253,8 @@ fn main() {
     run_mqtt(Arc::clone(&shared));
     if args.headless {
         run_headless(&shared);
+    } else if args.epaper {
+        run_epaper(&shared);
     } else {
         run_window(&shared, args.calibrate);
     }
@@ -387,6 +398,90 @@ fn run_window(shared: &Shared, fake_adc: bool) {
             }
         }
         thread::sleep(TICK.saturating_sub(frame_start.elapsed()));
+    }
+}
+
+/// The e-paper board: redraws once a second like the firmware, and logs
+/// each refresh the panel would do.
+#[expect(
+    clippy::wildcard_enum_match_arm,
+    reason = "of the window events only a few keys and quitting matter"
+)]
+fn run_epaper(shared: &Shared) {
+    let mut display =
+        SimulatorDisplay::<Rgb565>::new(Size::new(epaper::W as u32, epaper::H as u32));
+    let mut window = Window::new("Herald e-paper", &output_settings());
+    let mut renderer = Renderer::new(epaper::H as usize);
+    let mut refresher = Refresher::default();
+    let mut next_render = Instant::now();
+    loop {
+        let env = shared.env();
+        if Instant::now() >= next_render {
+            let frame = {
+                let mut app = shared.app.lock().unwrap_or_else(PoisonError::into_inner);
+                app.tick(&env, None);
+                shared.apply_effects(&mut app);
+                let frame = renderer.render(&app, &env);
+                drop(app);
+                frame
+            };
+            if let Some(kind) = refresher.next(&frame) {
+                say!(
+                    "[epaper] {} refresh",
+                    if kind == Refresh::Full {
+                        "full"
+                    } else {
+                        "partial"
+                    }
+                );
+                show_frame(&mut display, &frame);
+                shared
+                    .app
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .set_shown_frame(frame);
+            }
+            next_render = Instant::now() + Duration::from_secs(1);
+        }
+        window.update(&display);
+        for event in window.events() {
+            let b = match event {
+                SimulatorEvent::Quit => return,
+                SimulatorEvent::KeyDown {
+                    keycode,
+                    repeat: false,
+                    ..
+                } => match keycode {
+                    Keycode::Up | Keycode::Left => Button::Up,
+                    Keycode::Down | Keycode::Right => Button::Down,
+                    Keycode::Return | Keycode::Space => Button::Press,
+                    Keycode::Escape => Button::Exit,
+                    Keycode::M => Button::Menu,
+                    _ => continue,
+                },
+                _ => continue,
+            };
+            let env = shared.env();
+            let mut app = shared.app.lock().unwrap_or_else(PoisonError::into_inner);
+            if epaper::button(&mut app, b, &env) == epaper::Response::FullRefresh {
+                refresher.force_full();
+            }
+            next_render = Instant::now();
+        }
+        thread::sleep(TICK);
+    }
+}
+
+fn show_frame(display: &mut SimulatorDisplay<Rgb565>, frame: &epaper::Frame) {
+    for y in 0..epaper::H {
+        for x in 0..epaper::W {
+            let color = if frame.black(x, y) {
+                Rgb565::new(4, 8, 4)
+            } else {
+                Rgb565::new(28, 57, 27)
+            };
+            let Ok(()) = Pixel(Point::new(x, y), color).draw(display);
+        }
     }
 }
 
@@ -656,6 +751,50 @@ const DEMO_SCREENS: [(&str, &str); 2] = [
 /// demo data and the screenshots.
 const SAMPLE_WEATHER: &str = r#"{"temp":6.4,"condition":"cloudy","is_day":false,"sunrise":"07:38","sunset":"16:05","hourly":[{"hour":17,"temp":6.4,"rain":23,"condition":"cloudy","is_day":false},{"hour":18,"temp":6.2,"rain":40,"condition":"cloudy","is_day":false},{"hour":19,"temp":5.9,"rain":35,"condition":"rainy","is_day":false},{"hour":20,"temp":5.7,"rain":18,"condition":"rainy","is_day":false},{"hour":21,"temp":5.5,"rain":13,"condition":"rainy","is_day":false},{"hour":22,"temp":5.3,"rain":10,"condition":"cloudy","is_day":false},{"hour":23,"temp":5.2,"rain":20,"condition":"cloudy","is_day":false},{"hour":0,"temp":4.9,"rain":33,"condition":"cloudy","is_day":false},{"hour":1,"temp":4.8,"rain":45,"condition":"rainy","is_day":false},{"hour":2,"temp":4.8,"rain":45,"condition":"rainy","is_day":false},{"hour":3,"temp":4.7,"rain":28,"condition":"cloudy","is_day":false},{"hour":4,"temp":4.5,"rain":13,"condition":"partlycloudy","is_day":false}],"daily":[{"date":"2026-11-21","min":0.6,"max":6.7,"condition":"rainy"},{"date":"2026-11-22","min":2.1,"max":4.9,"condition":"rainy"},{"date":"2026-11-23","min":-0.6,"max":3.0,"condition":"snowy"},{"date":"2026-11-24","min":-1.0,"max":1.7,"condition":"cloudy"}]}"#;
 
+/// The e-paper layout: the dashboard, custom screens and setup.
+fn epaper_screenshots(dir: &Path, app: &mut App, env: &mut Env) -> Result<usize, String> {
+    let mut display =
+        SimulatorDisplay::<Rgb565>::new(Size::new(epaper::W as u32, epaper::H as u32));
+    let mut renderer = Renderer::new(epaper::H as usize);
+    let mut count = 0;
+    let mut shot = |app: &App, env: &Env, name: &str| -> Result<(), String> {
+        show_frame(&mut display, &renderer.render(app, env));
+        count += 1;
+        let file = dir.join(format!("epaper-{count:02}-{name}.png"));
+        display
+            .to_rgb_output_image(&output_settings())
+            .save_png(&file)
+            .map_err(|e| format!("{}: {e}", file.display()))
+    };
+    env.net = connected_net();
+    run(app, env, 60, None);
+    request(app, env, "DELETE", "/api/items", "")?;
+    app.clear_weather();
+    post(app, env, "/api/view", r#"{"view":"home"}"#)?;
+    shot(app, env, "empty")?;
+    demo(app, env)?;
+    post(app, env, "/api/view", r#"{"view":"home"}"#)?;
+    shot(app, env, "dashboard")?;
+    for i in 0..6 {
+        request(
+            app,
+            env,
+            "PUT",
+            &format!("/api/items/extra{i}"),
+            r#"{"text":"Another notification","color":"grey"}"#,
+        )?;
+    }
+    shot(app, env, "overflow")?;
+    for (name, _) in DEMO_SCREENS {
+        post(app, env, "/api/view", &format!(r#"{{"view":"{name}"}}"#))?;
+        shot(app, env, &format!("screen-{name}"))?;
+    }
+    env.net = setup_net();
+    run(app, env, 60, None);
+    shot(app, env, "setup")?;
+    Ok(count)
+}
+
 /// Lets animations settle, with an optional finger on the screen.
 fn run(app: &mut App, env: &mut Env, ms: u64, touch: Option<(i32, i32)>) {
     for _ in 0..ms / 30 {
@@ -794,6 +933,8 @@ fn screenshots(dir: &Path) -> Result<(), String> {
     env.net = setup_net();
     run(&mut app, &mut env, 60, None);
     shot(&mut app, &env, "wifi-setup")?;
+
+    count += epaper_screenshots(dir, &mut app, &mut env)?;
 
     println!("{count} screenshots written to {}", dir.display());
     Ok(())

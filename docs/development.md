@@ -10,6 +10,12 @@ is documented in [`crates/firmware/src/board.rs`](../crates/firmware/src/board.r
 
 A speaker (8 Ω, 1 W, PH1.25 plug) is optional; it is only used for beeps.
 
+Elecrow CrowPanel ESP32 5.79" E-Paper HMI Display: ESP32-S3-WROOM-1-N8R8 (8 MB
+flash, 8 MB PSRAM), 792x272 black-and-white e-paper with two SSD1683
+controllers, a rotary switch and MENU/EXIT buttons, no touch. Used upright
+(272x792). Wiring in
+[`crates/firmware-epaper/src/board.rs`](../crates/firmware-epaper/src/board.rs).
+
 ## Layout
 
 | Path | What it is |
@@ -17,6 +23,7 @@ A speaker (8 Ω, 1 W, PH1.25 plug) is optional; it is only used for beeps.
 | `crates/ui` | All logic and rendering, hardware-free: views, custom screens, gestures, feed, rotation, night mode, weather, HTTP API, MQTT, the web app |
 | `crates/simulator` | Runs `ui` in a desktop window (or headless) and serves the API on localhost |
 | `crates/firmware` | ESP32 target: display, touch, WiFi, storage, OTA, speaker, LED. Built separately from the workspace |
+| `crates/firmware-epaper` | ESP32-S3 e-paper board: panel driver and buttons; the network, MQTT and storage modules are the TFT firmware's, included with `#[path]` |
 | `tools/claude-hook.sh` | Example: show Claude Code's state on the display |
 
 ## Try it without the board
@@ -35,6 +42,8 @@ device serves are at <http://127.0.0.1:8080>.
   `--calibrate` starts with touch calibration, `--setup` in WiFi setup mode,
   `--headless` runs without a window, `--port N` picks the port,
   `--screenshots DIR` renders every screen to PNG.
+- `--epaper` shows the e-paper board instead: arrow keys are the rotary
+  switch, Enter presses it, Escape is EXIT and M is MENU.
 
 ## Build and flash the firmware
 

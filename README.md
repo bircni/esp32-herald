@@ -4,7 +4,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 A small status display for your desk. Herald is Rust firmware for the
-Freenove ESP32 Display 3.5" that shows a clock, the weather and a feed of what
+Freenove ESP32 Display 3.5" and the Elecrow CrowPanel 5.79" e-paper that shows a clock, the weather and a feed of what
 your other systems tell it: an open window, Claude Code waiting for input, a
 failed build. It fetches nothing on its own; Home Assistant or any other MQTT
 client sends it what to show.
@@ -18,6 +18,12 @@ client sends it what to show.
 | ![Hourly curve with rain chances and four day cards](docs/images/forecast.png) | ![Today, the month grid, sunrise and sunset](docs/images/calendar.png) | ![Energy screen with value, gauge, chart, list, progress bar and countdown widgets](docs/images/screen-energy.png) |
 
 ![The web app: a live mirror of the device's screen with view buttons, brightness and status](docs/images/web-overview.png)
+
+On the e-paper board, used upright, everything is on one tall page:
+
+<p align="center">
+  <img src="docs/images/epaper.png" width="160" alt="The e-paper dashboard: clock, weather, the next hours, the feed and the next days">
+</p>
 
 ## Features
 
@@ -52,7 +58,10 @@ espflash flash --partition-table partitions.csv --erase-parts otadata \
   target/xtensa-esp32-espidf/release/herald-firmware
 ```
 
-On first boot, tap the four calibration crosses, then join the `Herald-XXXX`
+For the e-paper board, build in `crates/firmware-epaper` instead and flash
+`target/xtensa-esp32s3-espidf/release/herald-epaper`.
+
+On first boot (TFT board), tap the four calibration crosses, then join the `Herald-XXXX`
 network with your phone and enter your WiFi. Later updates go over WiFi from
 the web app.
 

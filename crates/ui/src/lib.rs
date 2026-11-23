@@ -8,6 +8,7 @@ pub mod color;
 pub mod command;
 pub mod de;
 pub mod dns;
+pub mod epaper;
 pub mod feed;
 pub mod gesture;
 pub mod gfx;

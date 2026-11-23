@@ -50,6 +50,9 @@ main{padding:28px 36px 120px;max-width:1000px;width:100%}
 .screen{position:relative;aspect-ratio:3/2;overflow:hidden;border-radius:4px;cursor:pointer;touch-action:pan-y;user-select:none;-webkit-user-select:none}
 .dev{position:absolute;left:0;top:0;width:480px;height:320px;transform-origin:0 0;font-family:"Helvetica Neue",Helvetica,Arial,sans-serif;overflow:hidden}
 .dev>*{position:absolute}
+body.epaper .tft-only,body:not(.epaper) .epaper-only{display:none}
+.screen.tall{aspect-ratio:272/792;max-width:280px;margin:0 auto;cursor:default;background:#fff}
+.screen.tall img{display:block;width:100%;height:100%;image-rendering:pixelated}
 .sleep{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.7);color:#cfd4da;font-size:14px;pointer-events:none}
 .mirror-hint{font-size:13px;color:var(--muted);margin-top:10px}
 .controls{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px;align-items:center}
@@ -150,12 +153,13 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
           <button class="icon" id="prev" aria-label="Previous view">&#8592;</button>
           <div class="seg" id="viewbar" role="group" aria-label="Views"></div>
           <button class="icon" id="next" aria-label="Next view">&#8594;</button>
-          <button id="power" aria-pressed="false">Display on</button>
+          <button id="power" class="tft-only" aria-pressed="false">Display on</button>
         </div>
-        <p class="mirror-hint">Drawn by this page from the device's state. Click it to tap the real screen, drag sideways to swipe, hold to open the device menu.</p>
+        <p class="mirror-hint tft-only">Drawn by this page from the device's state. Click it to tap the real screen, drag sideways to swipe, hold to open the device menu.</p>
+        <p class="mirror-hint epaper-only">What the e-paper shows right now. Use the buttons above to change the page.</p>
       </div>
       <div>
-        <div class="field"><label for="o-bright">Brightness <span id="o-bright-v"></span></label><input type="range" id="o-bright" min="5" max="100" step="5"></div>
+        <div class="field tft-only"><label for="o-bright">Brightness <span id="o-bright-v"></span></label><input type="range" id="o-bright" min="5" max="100" step="5"></div>
         <dl class="facts" id="facts" style="margin-top:18px"></dl>
       </div>
     </div>
@@ -204,9 +208,10 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
     <h2>Look</h2>
     <div class="form">
       <div class="field"><label for="d-theme">Theme</label><select id="d-theme" data-key="theme"><option value="dark">Dark</option><option value="light">Light</option></select></div>
-      <div class="field"><label for="d-accent">Accent colour</label><input type="color" id="d-accent" data-key="accent_color" data-type="color"></div>
-      <div class="field"><label for="d-bright">Brightness <span data-out="d-bright"></span></label><input type="range" id="d-bright" data-key="brightness" data-type="int" min="5" max="100" step="5"></div>
-      <div class="field"><label for="d-sleep">Turn off after (s without touch, 0 = never)</label><input type="number" id="d-sleep" data-key="sleep_secs" data-type="int" min="0" max="86400"></div>
+      <label class="check epaper-only"><input type="checkbox" id="d-flip" data-key="upside_down" data-type="bool"> Upside down (USB port at the top)</label>
+      <div class="field tft-only"><label for="d-accent">Accent colour</label><input type="color" id="d-accent" data-key="accent_color" data-type="color"></div>
+      <div class="field tft-only"><label for="d-bright">Brightness <span data-out="d-bright"></span></label><input type="range" id="d-bright" data-key="brightness" data-type="int" min="5" max="100" step="5"></div>
+      <div class="field tft-only"><label for="d-sleep">Turn off after (s without touch, 0 = never)</label><input type="number" id="d-sleep" data-key="sleep_secs" data-type="int" min="0" max="86400"></div>
     </div>
     <h2>Rotation</h2>
     <p class="muted">Steps through the chosen views on its own. It waits a minute after a touch. The same time in both fields means all day.</p>
@@ -217,6 +222,7 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
       <div class="field"><label for="d-runtil">Until</label><input type="time" id="d-runtil" data-key="rotate_until"></div>
       <div class="field wide"><span class="lbl">Views</span><div class="chips" id="d-rviews" data-key="rotate_views" data-type="views"></div></div>
     </div>
+    <div class="tft-only">
     <h2>Night</h2>
     <p class="muted">Dims or turns off the screen between two times. A touch, or an item sent with <code>wake</code>, lights it up for the usual time.</p>
     <label class="check"><input type="checkbox" id="d-night" data-key="night" data-type="bool"> Use night mode</label>
@@ -224,6 +230,7 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
       <div class="field"><label for="d-nfrom">From</label><input type="time" id="d-nfrom" data-key="night_from"></div>
       <div class="field"><label for="d-nuntil">Until</label><input type="time" id="d-nuntil" data-key="night_until"></div>
       <div class="field"><label for="d-nbright">Brightness at night <span data-out="d-nbright"></span></label><input type="range" id="d-nbright" data-key="night_brightness" data-type="int" min="0" max="100" step="5"></div>
+    </div>
     </div>
   </section>
 
@@ -464,6 +471,7 @@ document.querySelectorAll(".screen").forEach(s=>ro.observe(s));
 // Rendering
 function render(){
   if(!S)return;
+  document.body.classList.toggle("epaper",!!S.epaper);
   const setup=S.net&&S.net.state==="setup";
   $("setup").hidden=!setup;$("shell").hidden=setup;if(setup)return;
   const a=accent(),rgb=parseInt(a.slice(1),16),lum=((rgb>>16)*299+((rgb>>8)&255)*587+(rgb&255)*114)/1000,root=document.documentElement.style;
@@ -478,7 +486,12 @@ function render(){
 function renderOverview(){
   $("o-host").textContent=S.hostname||"Herald";
   const cur=(S.views||[]).find(v=>v.name===S.view);$("o-sub").textContent=cur?(cur.custom?"showing the screen "+S.view:"showing "+S.view):"";
-  const dev=$("dev"),d=drawView(S.view);dev.style.background=d.bg;dev.innerHTML=d.html;fit(dev);
+  const dev=$("dev");
+  if(S.epaper){// e-paper boards send their picture; nothing to draw here
+    const sc=$("screen");sc.classList.add("tall");dev.hidden=true;let img=$("frame");
+    if(!img){img=document.createElement("img");img.id="frame";img.alt="What the e-paper display shows";sc.prepend(img)}
+    const src="/api/frame.bmp?r="+S.epaper;if(img.getAttribute("src")!==src)img.src=src;
+  }else{const d=drawView(S.view);dev.style.background=d.bg;dev.innerHTML=d.html;fit(dev)}
   $("sleep").hidden=!S.asleep;
   const vb=$("viewbar"),names=(S.views||[]).map(v=>v.name).join();
   if(vb.dataset.names!==names){vb.dataset.names=names;vb.innerHTML=(S.views||[]).map(v=>`<button data-view="${esc(v.name)}">${esc(v.name[0].toUpperCase()+v.name.slice(1))}</button>`).join("")}
@@ -726,13 +739,13 @@ let brT;$("o-bright").oninput=e=>{const v=+e.target.value;$("o-bright-v").textCo
 $("f-list").addEventListener("click",e=>{const b=e.target.closest("[data-del]");if(b)api("DELETE","/api/items/"+encodeURIComponent(b.dataset.del)).then(()=>{etag="";poll()},err=>toast(err.message))});
 $("f-clear").onclick=()=>{if(confirm("Remove every item from the feed?"))api("DELETE","/api/items").then(()=>{etag="";poll()},err=>toast(err.message))};
 (()=>{const sc=$("screen");let d=null;
-  sc.addEventListener("pointerdown",e=>{d={x:e.clientX,y:e.clientY,t:performance.now()};sc.setPointerCapture(e.pointerId)});
+  sc.addEventListener("pointerdown",e=>{if(S&&S.epaper)return;d={x:e.clientX,y:e.clientY,t:performance.now()};sc.setPointerCapture(e.pointerId)});
   sc.addEventListener("pointercancel",()=>{d=null});
   sc.addEventListener("pointerup",e=>{if(!d)return;const dx=e.clientX-d.x,dy=e.clientY-d.y,held=performance.now()-d.t,r=sc.getBoundingClientRect();d=null;
     if(Math.abs(dx)>40&&Math.abs(dx)>Math.abs(dy)){act("/api/swipe",{dir:dx<0?"left":"right"});return}
     const x=Math.round(Math.min(479,Math.max(0,(e.clientX-r.left)*480/r.width))),y=Math.round(Math.min(319,Math.max(0,(e.clientY-r.top)*320/r.height)));
     act("/api/tap",{x,y,long:held>650})});
-  sc.addEventListener("keydown",e=>{if(e.key==="ArrowLeft")act("/api/swipe",{dir:"right"});else if(e.key==="ArrowRight")act("/api/swipe",{dir:"left"})});
+  sc.addEventListener("keydown",e=>{if(S&&S.epaper)return;if(e.key==="ArrowLeft")act("/api/swipe",{dir:"right"});else if(e.key==="ArrowRight")act("/api/swipe",{dir:"left"})});
 })();
 $("w-save").onclick=async()=>{if(!confirm("Save this network and restart the device?"))return;try{await api("POST","/api/wifi",{ssid:$("w-ssid").value,password:$("w-pass").value});toast("Saved. The device restarts now.")}catch(e){toast(e.message)}};
 $("su-save").onclick=async()=>{$("su-err").textContent="";try{await api("POST","/api/wifi",{ssid:$("su-ssid").value,password:$("su-pass").value});$("su-save").disabled=true;$("su-save").textContent="Saved. Herald restarts and joins the network."}catch(e){$("su-err").textContent=e.message}};

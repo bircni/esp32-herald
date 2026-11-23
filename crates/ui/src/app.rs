@@ -60,6 +60,9 @@ pub struct App {
     /// The touch that woke the display must not trigger anything else.
     swallow_touch: bool,
     effects: Vec<Effect>,
+    /// On e-paper boards: the picture the panel shows and a counter that
+    /// changes with it, for the web app.
+    pub(crate) shown_frame: Option<(u64, crate::epaper::Frame)>,
     buf: Vec<Rgb565>,
     cache: Vec<u64>,
     cache_screen: Option<(Showing, i64)>,
@@ -93,6 +96,7 @@ impl App {
             asleep: false,
             swallow_touch: false,
             effects: Vec::new(),
+            shown_frame: None,
             buf: vec![Rgb565::BLACK; gfx::BAND_PIXELS],
             cache: Vec::new(),
             cache_screen: None,
@@ -317,6 +321,7 @@ impl App {
     /// Replaces the weather, e.g. from an MQTT message.
     pub fn set_weather(&mut self, mut w: Weather, env: &Env) {
         w.updated = env.local.map(|t| (t.hour, t.minute));
+        w.date_hours(env.local.as_ref());
         self.weather = Some(w);
         self.weather_ms = env.now_ms;
     }
@@ -485,6 +490,12 @@ impl App {
         self.set_view(order[next], now_ms);
     }
 
+    /// A button or touch: wakes the screen and pauses rotation.
+    pub(crate) const fn touched(&mut self, now_ms: u64) {
+        self.asleep = false;
+        self.last_activity_ms = now_ms;
+    }
+
     pub(crate) fn start_calibration(&mut self) {
         self.menu_open = false;
         self.calibrate = Some(views::setup::CalibrateState::default());
@@ -507,7 +518,7 @@ impl App {
             Showing::View(view) => {
                 let mut regions = match view {
                     ViewId::Home => views::home::regions(self, env),
-                    ViewId::Forecast => views::forecast::regions(self),
+                    ViewId::Forecast => views::forecast::regions(self, env),
                     ViewId::Calendar => views::calendar::regions(self, env),
                     ViewId::Screen(slot) => views::custom::regions(self, slot, env),
                 };
@@ -527,7 +538,7 @@ impl App {
             Showing::View(view) => {
                 match view {
                     ViewId::Home => views::home::paint(self, c, env, theme),
-                    ViewId::Forecast => views::forecast::paint(self, c, theme),
+                    ViewId::Forecast => views::forecast::paint(self, c, env, theme),
                     ViewId::Calendar => views::calendar::paint(self, c, env, theme),
                     ViewId::Screen(slot) => views::custom::paint(self, slot, c, env, theme),
                 }

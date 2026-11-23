@@ -474,6 +474,9 @@ pub fn state(app: &App, env: &Env) -> Value {
         "heap_free": env.heap_free,
         "firmware": { "slot": env.firmware_slot, "ota": env.firmware_slot.is_some() },
         "screens_rev": app.screens().rev().to_string(),
+        // E-paper boards: the web app shows /api/frame.bmp instead of
+        // drawing the screen itself.
+        "epaper": app.shown_frame.as_ref().map(|(rev, _)| rev.to_string()),
         "items": items_json(app, env),
         "weather": app.weather().map(|w| json!({
             "temp_c": round1(w.temp_c),
@@ -484,7 +487,7 @@ pub fn state(app: &App, env: &Env) -> Value {
             "updated": w.updated.map(hhmm),
             "sunrise": w.sunrise.map(hhmm),
             "sunset": w.sunset.map(hhmm),
-            "hours": w.hours.iter().map(|h| json!({
+            "hours": w.upcoming(env.local.as_ref()).iter().map(|h| json!({
                 "hour": h.hour, "temp_c": round1(h.temp_c), "rain_pct": h.rain_pct,
                 "condition": h.condition, "is_day": h.is_day,
             })).collect::<Vec<_>>(),

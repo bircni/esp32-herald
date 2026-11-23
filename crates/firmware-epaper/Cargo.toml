@@ -1,0 +1,90 @@
+[package]
+name = "herald-epaper"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+authors = ["bircni"]
+license = "MIT"
+repository = "https://github.com/bircni/esp32-herald"
+publish = false
+
+[[bin]]
+name = "herald-epaper"
+harness = false # no host test harness on the target; logic tests live in crates/ui
+
+# Size first, measured on the flashed image: lto + 1 codegen unit saved
+# 73 KB, opt-level "z" another 50 KB. panic = "abort" changes nothing, the
+# target aborts already.
+[profile.release]
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+
+[profile.dev]
+debug = true
+opt-level = "z"
+
+# mDNS (`<hostname>.local`) is a separate component since ESP-IDF 5.
+[[package.metadata.esp-idf-sys.extra_components]]
+remote_component = { name = "espressif/mdns", version = "1.15" }
+
+[dependencies]
+ui = { path = "../ui" }
+log = "0.4"
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+embedded-graphics = "0.8"
+esp-idf-svc = "0.53"
+
+[build-dependencies]
+embuild = "0.33.7"
+
+# Same lints as the workspace (this crate is built outside it).
+[lints.rust]
+unsafe_code = "deny"
+deprecated = "warn"
+elided_lifetimes_in_paths = "warn"
+rust_2021_prelude_collisions = "warn"
+semicolon_in_expressions_from_macros = "warn"
+trivial_numeric_casts = "warn"
+unsafe_op_in_unsafe_fn = "warn"
+unused_extern_crates = "warn"
+unused_import_braces = "warn"
+unused_lifetimes = "warn"
+
+[lints.rustdoc]
+all = "warn"
+missing_crate_level_docs = "warn"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+correctness = { level = "warn", priority = -1 }
+suspicious = { level = "warn", priority = -1 }
+style = { level = "warn", priority = -1 }
+complexity = { level = "warn", priority = -1 }
+perf = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+# Restriction lints, as in the other repos.
+allow_attributes = "warn"
+allow_attributes_without_reason = "warn"
+assertions_on_result_states = "warn"
+create_dir = "warn"
+clone_on_ref_ptr = "warn"
+expect_used = "warn"
+missing_assert_message = "warn"
+panic_in_result_fn = "warn"
+str_to_string = "warn"
+todo = "warn"
+unwrap_used = "warn"
+unimplemented = "warn"
+wildcard_enum_match_arm = "warn"
+# Drawing code converts between i32/u32/u16 pixel values all the time, all
+# bounded by the screen; casts there are intentional.
+cast_possible_truncation = "allow"
+cast_possible_wrap = "allow"
+cast_sign_loss = "allow"
+cast_precision_loss = "allow"
+# mul_add is no faster on the ESP32 and reads worse in layout maths.
+suboptimal_flops = "allow"

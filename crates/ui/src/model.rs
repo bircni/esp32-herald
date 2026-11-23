@@ -135,6 +135,9 @@ pub struct Settings {
     /// Time server, host name or IP address.
     pub ntp_server: String,
     pub theme: ThemeKind,
+    /// Turns the picture by 180 degrees, for a board standing the other way
+    /// round (e-paper boards).
+    pub upside_down: bool,
     /// Accent colour as `#RRGGBB`.
     pub accent_color: String,
     /// Backlight brightness in percent (5..=100).
@@ -180,6 +183,7 @@ impl Default for Settings {
             timezone: "CET-1CEST,M3.5.0,M10.5.0/3".into(),
             ntp_server: "pool.ntp.org".into(),
             theme: ThemeKind::Dark,
+            upside_down: false,
             accent_color: "#35D0FF".into(),
             brightness: 80,
             sleep_secs: 300,
