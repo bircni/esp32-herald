@@ -61,7 +61,15 @@ A 480x320 window opens (the mouse is your finger) and the web app runs at
 <http://127.0.0.1:8080>. `--board crowpanel-579` shows the e-paper board
 instead (arrow keys and Enter are its rotary switch).
 
-To flash a board (by its name from the table above):
+To install a release, download `herald-<board>-<version>-full.bin` from
+[Releases](https://github.com/bircni/esp32-herald/releases) and write it over
+USB (`cargo install espflash` first):
+
+```sh
+espflash write-bin 0x0 herald-crowpanel-579-0.1.0-full.bin
+```
+
+To build and flash it yourself instead (by its name from the table above):
 
 ```sh
 cargo install espup espflash ldproxy && espup install --targets esp32,esp32s3
@@ -70,7 +78,7 @@ cargo install espup espflash ldproxy && espup install --targets esp32,esp32s3
 
 On first boot (TFT board), tap the four calibration crosses, then join the `Herald-XXXX`
 network with your phone and enter your WiFi. Later updates go over WiFi from
-the web app.
+the web app, with the release's `-update.bin`.
 
 ## Sending things
 
@@ -100,7 +108,7 @@ with your prefix filled in.
 - [MQTT and HTTP](docs/mqtt-and-http.md): every topic and field, weather,
   Home Assistant automations, the HTTP API and the Claude Code hook.
 - [Development](docs/development.md): hardware, project layout, building,
-  testing and design notes.
+  testing, releasing and design notes.
 - [Adding a board](docs/adding-a-board.md): what a new board needs.
 
 ## License

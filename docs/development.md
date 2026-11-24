@@ -89,6 +89,29 @@ make ota-freenove-35 HOST=herald.local TOKEN=...   # TOKEN only if one is set
 The device writes it into the other slot and restarts. If the new firmware never
 connects to WiFi, the bootloader goes back to the previous one.
 
+## Releasing
+
+Versions follow [Semantic Versioning](https://semver.org) and commits (squash
+merges) [Conventional Commits](https://www.conventionalcommits.org): `feat`
+is a minor version, a breaking change (`!`) a major one (a minor while below
+1.0).
+
+1. Set the version in `Cargo.toml` and `firmware/Cargo.toml` and run
+   `cargo check` in both workspaces so the lock files follow; merge that.
+2. Create a release on GitHub with a new tag `v<version>` on `main` and
+   generated notes:
+
+   ```sh
+   gh release create v0.2.0 --target main --generate-notes
+   ```
+
+CI then builds every board and attaches, per board,
+`herald-<board>-<version>-full.bin` (`make full-<board>`: bootloader,
+partition table and app for the first USB install at `0x0`, which also
+erases the settings), `herald-<board>-<version>-update.bin`
+(`make image-<board>`: for updates over WiFi) and `SHA256SUMS`. It stops if
+the tag and the versions in `Cargo.toml` disagree.
+
 ## Testing
 
 ```sh

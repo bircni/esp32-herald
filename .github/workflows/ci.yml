@@ -7,6 +7,10 @@ on:
   pull_request:
     branches:
       - main
+  # A published release gets the firmware images attached.
+  release:
+    types:
+      - published
 
 jobs:
   check:
@@ -95,10 +99,47 @@ jobs:
 
       - name: clippy
         run: make clippy-${{ matrix.board }}
-      - name: build and image
-        run: make image-${{ matrix.board }}
+      - name: build and images
+        run: make image-${{ matrix.board }} full-${{ matrix.board }}
       - uses: actions/upload-artifact@v7.0.2
         with:
           name: herald-${{ matrix.board }}
-          path: firmware/target/${{ matrix.board }}.bin
+          path: |
+            firmware/target/${{ matrix.board }}.bin
+            firmware/target/${{ matrix.board }}-full.bin
           if-no-files-found: error
+
+  release:
+    name: Release images
+    if: github.event_name == 'release'
+    needs: [check, firmware-fmt, firmware]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      # The tag (v0.1.0) must name the version both workspaces are at.
+      - name: check the version
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          for f in Cargo.toml firmware/Cargo.toml; do
+            grep -qx "version = \"$v\"" "$f" || { echo "::error::$f is not at $v"; exit 1; }
+          done
+          echo "VERSION=$v" >> "$GITHUB_ENV"
+      - uses: actions/download-artifact@v8.0.2
+        with:
+          path: artifacts
+          pattern: herald-*
+      - name: name the images
+        run: |
+          mkdir dist
+          for dir in artifacts/herald-*; do
+            board="${dir#artifacts/herald-}"
+            cp "$dir/$board.bin" "dist/herald-$board-$VERSION-update.bin"
+            cp "$dir/$board-full.bin" "dist/herald-$board-$VERSION-full.bin"
+          done
+          (cd dist && sha256sum * > SHA256SUMS)
+      - name: attach to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$GITHUB_REF_NAME" dist/* --clobber
