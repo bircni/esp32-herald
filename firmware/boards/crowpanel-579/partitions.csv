@@ -1,0 +1,7 @@
+# Name,   Type, SubType, Offset,   Size
+# 8 MB flash: two app slots for updates over WiFi, each with lots of room.
+nvs,      data, nvs,     0x9000,   0x5000
+otadata,  data, ota,     0xe000,   0x2000
+ota_0,    app,  ota_0,   0x10000,  0x3F0000
+ota_1,    app,  ota_1,   0x400000, 0x3F0000
+phy_init, data, phy,     0x7F0000, 0x1000

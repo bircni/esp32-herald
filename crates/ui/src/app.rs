@@ -1,19 +1,19 @@
 //! The application: owns all state, reacts to touch and API calls, and
 //! repaints only the screen regions whose content changed.
 
-use embedded_graphics::{pixelcolor::Rgb565, prelude::*, primitives::Rectangle};
-
 use crate::{
+    action::Action,
     feed::{Feed, Item},
-    gesture::{Dir, Gesture, Recognizer},
-    gfx::{self, Canvas},
+    layout::Layout,
     model::{
         ALL_SCREENS, Beep, Calibration, Effect, Env, ItemColor, Led, NetState, RawTouch, Settings,
-        ViewId, screen,
+        ViewId,
     },
+    profile::Profile,
     screen::{Screen, Screens},
     theme::Theme,
-    views::{self, Region},
+    touch::{Fed, Touch},
+    views,
     weather::{self, Weather},
 };
 
@@ -34,12 +34,13 @@ pub(crate) enum Showing {
     reason = "independent UI flags, not a state machine"
 )]
 pub struct App {
+    profile: Profile,
     pub(crate) settings: Settings,
-    pub(crate) calibration: Option<Calibration>,
+    /// Touch input; `None` on boards without a touch panel.
+    pub(crate) touch: Option<Touch>,
     pub(crate) view: ViewId,
     pub(crate) menu_open: bool,
     pub(crate) menu_confirm_wifi: bool,
-    pub(crate) calibrate: Option<views::setup::CalibrateState>,
     pub(crate) setup_dismissed: bool,
     pub(crate) feed: Feed,
     pub(crate) weather: Option<Weather>,
@@ -52,30 +53,29 @@ pub struct App {
     night_dim: bool,
     /// At night, a touch or an alert lights the screen until then.
     night_wake_until_ms: u64,
-    gesture: Recognizer,
     last_activity_ms: u64,
     /// When the view last changed, for rotation.
     last_switch_ms: u64,
     pub(crate) asleep: bool,
-    /// The touch that woke the display must not trigger anything else.
-    swallow_touch: bool,
+    /// A full redraw was asked for (on e-paper: a full refresh).
+    refresh_requested: bool,
     effects: Vec<Effect>,
-    buf: Vec<Rgb565>,
-    cache: Vec<u64>,
-    cache_screen: Option<(Showing, i64)>,
+    /// On e-paper boards: the picture the panel shows and a counter that
+    /// changes with it, for the web app.
+    pub(crate) shown_frame: Option<(u64, crate::present::Frame)>,
 }
 
 impl App {
-    /// `calibration` is `None` on first boot, which starts with the touch
-    /// calibration screen. So does a calibration made for another layout.
-    pub fn new(settings: Settings, calibration: Option<Calibration>) -> Self {
-        let calibration = calibration.filter(Calibration::fits_screen);
+    /// The app for a board described by `profile`. On touch boards,
+    /// `calibration` is `None` on first boot, which starts with the
+    /// calibration screen; so does one made for another layout. Boards
+    /// without touch ignore it.
+    #[must_use]
+    pub fn new(profile: Profile, settings: Settings, calibration: Option<Calibration>) -> Self {
         Self {
+            profile,
             settings,
-            calibrate: calibration
-                .is_none()
-                .then(views::setup::CalibrateState::default),
-            calibration,
+            touch: profile.touch.then(|| Touch::new(calibration)),
             view: ViewId::Home,
             menu_open: false,
             menu_confirm_wifi: false,
@@ -87,19 +87,41 @@ impl App {
             night_now: false,
             night_dim: false,
             night_wake_until_ms: 0,
-            gesture: Recognizer::new(),
             last_activity_ms: 0,
             last_switch_ms: 0,
             asleep: false,
-            swallow_touch: false,
+            refresh_requested: false,
             effects: Vec::new(),
-            buf: vec![Rgb565::BLACK; gfx::BAND_PIXELS],
-            cache: Vec::new(),
-            cache_screen: None,
+            shown_frame: None,
         }
     }
 
     // ------------------------------------------------------------ accessors
+
+    /// The board this app runs on.
+    #[must_use]
+    pub const fn profile(&self) -> &Profile {
+        &self.profile
+    }
+
+    /// The screen as it is used now: the profile, turned by the
+    /// `orientation` setting where the board allows it.
+    #[must_use]
+    pub const fn screen(&self) -> Profile {
+        self.profile.oriented(self.settings.orientation)
+    }
+
+    /// The language the displays use.
+    #[must_use]
+    pub const fn lang(&self) -> crate::i18n::Language {
+        self.settings.language
+    }
+
+    /// The layout for the screen as it is used now.
+    #[must_use]
+    pub const fn layout(&self) -> Layout {
+        Layout::for_profile(&self.screen())
+    }
 
     #[must_use]
     pub const fn settings(&self) -> &Settings {
@@ -247,17 +269,6 @@ impl App {
         }
     }
 
-    /// A gesture made on the web preview, handled as if it was made on the
-    /// screen: it wakes a sleeping display and otherwise does what a touch
-    /// would.
-    pub fn remote_gesture(&mut self, gesture: Gesture, env: &Env) {
-        let was_asleep = self.asleep;
-        self.wake(env.now_ms);
-        if !was_asleep {
-            self.on_gesture(gesture, env);
-        }
-    }
-
     pub const fn set_view(&mut self, view: ViewId, now_ms: u64) {
         self.view = view;
         self.menu_open = false;
@@ -296,7 +307,7 @@ impl App {
     /// Brings the home view up so a new item is seen.
     pub fn alert(&mut self, beep: bool, now_ms: u64) {
         self.wake(now_ms);
-        if self.calibrate.is_none() {
+        if !self.calibrating() {
             self.set_view(ViewId::Home, now_ms);
         }
         if beep {
@@ -317,53 +328,115 @@ impl App {
     /// Replaces the weather, e.g. from an MQTT message.
     pub fn set_weather(&mut self, mut w: Weather, env: &Env) {
         w.updated = env.local.map(|t| (t.hour, t.minute));
+        w.date_hours(env.local.as_ref());
         self.weather = Some(w);
         self.weather_ms = env.now_ms;
     }
 
     // ---------------------------------------------------------------- tick
 
-    /// Advances the state by one step. `raw` is the current touch sample.
-    pub fn tick(&mut self, env: &Env, raw: Option<RawTouch>) {
+    /// One sample from the touch panel, on touch boards: call every tick,
+    /// before [`App::tick`]. Calibrates, recognises gestures and acts on
+    /// them.
+    pub fn touch(&mut self, raw: Option<RawTouch>, env: &Env) {
         let now = env.now_ms;
-
-        if let Some(state) = self.calibrate.as_mut() {
-            if let Some(calibration) = state.feed(raw) {
-                self.calibration = Some(calibration);
-                self.calibrate = None;
+        let upside_down = self.settings.upside_down;
+        let dark = self.is_dark();
+        let Some(touch) = self.touch.as_mut() else {
+            return;
+        };
+        match touch.feed(raw, upside_down, now) {
+            Fed::Nothing => {}
+            Fed::Calibrated(calibration) => {
                 self.effects.push(Effect::SaveCalibration(calibration));
-                self.gesture.reset();
-                self.swallow_touch = true;
                 self.last_activity_ms = now;
             }
+            Fed::Contact => {
+                // A dark screen only wakes; the touch does nothing else.
+                if dark {
+                    touch.swallow();
+                }
+                self.wake(now);
+            }
+            Fed::Action(action) => self.act(action, env),
+        }
+    }
+
+    /// The screen shows nothing: asleep, or off for the night.
+    const fn is_dark(&self) -> bool {
+        self.asleep || (self.night_dim && self.settings.night_brightness == 0)
+    }
+
+    /// Does what a person asked for, from any input: touch, buttons, the
+    /// web app or MQTT. It lights the screen and pauses rotation; on a dark
+    /// screen it does nothing else.
+    pub fn act(&mut self, action: Action, env: &Env) {
+        let now = env.now_ms;
+        let dark = self.is_dark();
+        self.wake(now);
+        if dark {
             return;
         }
-
-        let touch = match (raw, self.calibration.as_ref()) {
-            (Some(raw), Some(cal)) => Some(cal.map(raw)),
-            _ => None,
-        };
-        if touch.is_some() {
-            // A dark screen only wakes; the touch does nothing else.
-            let dark = self.asleep || (self.night_dim && self.settings.night_brightness == 0);
-            if dark && !self.swallow_touch {
-                self.swallow_touch = true;
-            }
-            self.asleep = false;
-            self.last_activity_ms = now;
-            if self.night_now {
-                self.light_at_night(now);
-            }
+        if action == Action::Refresh {
+            self.refresh_requested = true;
+            return;
         }
-        if self.swallow_touch {
-            self.gesture.reset();
-            if touch.is_none() {
-                self.swallow_touch = false;
-            }
-        } else if let Some(gesture) = self.gesture.update(touch, now) {
-            self.on_gesture(gesture, env);
+        match self.showing(env) {
+            Showing::Calibrate => {}
+            Showing::WifiSetup => match action {
+                Action::LongPress(_) | Action::Menu if self.has_menu() => self.menu_open = true,
+                // Any other input continues without WiFi.
+                Action::Next
+                | Action::Previous
+                | Action::Home
+                | Action::Menu
+                | Action::Refresh
+                | Action::Tap(_)
+                | Action::LongPress(_) => self.setup_dismissed = true,
+            },
+            Showing::Menu => match action {
+                Action::Tap(p) => views::menu::tap(self, p),
+                Action::Home => self.menu_open = false,
+                Action::Next
+                | Action::Previous
+                | Action::Menu
+                | Action::Refresh
+                | Action::LongPress(_) => {}
+            },
+            Showing::View(_) => match action {
+                Action::LongPress(_) | Action::Menu if self.has_menu() => {
+                    self.menu_open = true;
+                    self.menu_confirm_wifi = false;
+                }
+                Action::Next => self.step_view(true, now),
+                Action::Previous => self.step_view(false, now),
+                Action::Home => self.set_view(ViewId::Home, now),
+                Action::Menu | Action::LongPress(_) | Action::Tap(_) | Action::Refresh => {}
+            },
         }
+    }
 
+    /// Whether a full redraw was asked for since the last call.
+    pub const fn take_refresh(&mut self) -> bool {
+        std::mem::replace(&mut self.refresh_requested, false)
+    }
+
+    /// Only touch boards with a layout that has one open the menu.
+    const fn has_menu(&self) -> bool {
+        self.touch.is_some() && self.layout().has_menu()
+    }
+
+    pub(crate) const fn calibrating(&self) -> bool {
+        match &self.touch {
+            Some(t) => t.calibrating(),
+            None => false,
+        }
+    }
+
+    /// Advances the state by one step: expiry, night mode, sleep and
+    /// rotation.
+    pub fn tick(&mut self, env: &Env) {
+        let now = env.now_ms;
         self.feed.expire(now);
         self.screens.expire(now);
         self.leave_missing_screen();
@@ -395,7 +468,7 @@ impl App {
         if !s.rotate
             || self.asleep
             || !showing_view
-            || self.gesture.is_pressed()
+            || self.touch.as_ref().is_some_and(Touch::is_pressed)
             || now.saturating_sub(self.last_activity_ms) < ROTATE_TOUCH_PAUSE_MS
             || now.saturating_sub(self.last_switch_ms) < u64::from(s.rotate_secs) * 1000
             || !s.in_rotate_window(env.local.as_ref())
@@ -437,7 +510,7 @@ impl App {
     }
 
     pub(crate) const fn showing(&self, env: &Env) -> Showing {
-        if self.calibrate.is_some() {
+        if self.calibrating() {
             Showing::Calibrate
         } else if self.menu_open {
             Showing::Menu
@@ -448,34 +521,9 @@ impl App {
         }
     }
 
-    fn on_gesture(&mut self, gesture: Gesture, env: &Env) {
-        match self.showing(env) {
-            Showing::Calibrate => {}
-            Showing::WifiSetup => match gesture {
-                Gesture::Tap(_) => self.setup_dismissed = true,
-                Gesture::LongPress(_) => self.menu_open = true,
-                Gesture::Swipe(_) => {}
-            },
-            Showing::Menu => {
-                if let Gesture::Tap(p) = gesture {
-                    views::menu::tap(self, p);
-                }
-            }
-            Showing::View(_) => match gesture {
-                Gesture::LongPress(_) => {
-                    self.menu_open = true;
-                    self.menu_confirm_wifi = false;
-                }
-                Gesture::Swipe(Dir::Left) => self.step_view(true, env.now_ms),
-                Gesture::Swipe(Dir::Right) => self.step_view(false, env.now_ms),
-                Gesture::Swipe(_) | Gesture::Tap(_) => {}
-            },
-        }
-    }
-
     fn step_view(&mut self, forward: bool, now_ms: u64) {
-        let order = self.nav_order();
-        let i = order.iter().position(|v| *v == self.view).unwrap_or(0);
+        let (order, current) = self.layout().pages(self);
+        let i = order.iter().position(|v| *v == current).unwrap_or(0);
         let n = order.len();
         let next = if forward {
             (i + 1) % n
@@ -487,100 +535,9 @@ impl App {
 
     pub(crate) fn start_calibration(&mut self) {
         self.menu_open = false;
-        self.calibrate = Some(views::setup::CalibrateState::default());
-    }
-
-    // ---------------------------------------------------------------- draw
-
-    /// Position of the current view in swipe order, and how many there are.
-    fn nav_position(&self) -> (usize, usize) {
-        let order = self.nav_order();
-        let i = order.iter().position(|v| *v == self.view).unwrap_or(0);
-        (i, order.len())
-    }
-
-    fn regions(&self, showing: Showing, env: &Env) -> Vec<Region> {
-        match showing {
-            Showing::Calibrate => views::setup::calibrate_regions(self),
-            Showing::WifiSetup => views::setup::wifi_regions(env),
-            Showing::Menu => views::menu::regions(self, env),
-            Showing::View(view) => {
-                let mut regions = match view {
-                    ViewId::Home => views::home::regions(self, env),
-                    ViewId::Forecast => views::forecast::regions(self),
-                    ViewId::Calendar => views::calendar::regions(self, env),
-                    ViewId::Screen(slot) => views::custom::regions(self, slot, env),
-                };
-                let (i, n) = self.nav_position();
-                regions.push(views::nav_region(i, n));
-                regions
-            }
+        if let Some(touch) = self.touch.as_mut() {
+            touch.start_calibration();
         }
-    }
-
-    fn paint(&self, showing: Showing, c: &mut Canvas<'_>, env: &Env, theme: &Theme) {
-        gfx::fill(c, self::screen(), theme.bg);
-        match showing {
-            Showing::Calibrate => views::setup::paint_calibrate(self, c, theme),
-            Showing::WifiSetup => views::setup::paint_wifi(c, env, theme),
-            Showing::Menu => views::menu::paint(self, c, env, theme),
-            Showing::View(view) => {
-                match view {
-                    ViewId::Home => views::home::paint(self, c, env, theme),
-                    ViewId::Forecast => views::forecast::paint(self, c, theme),
-                    ViewId::Calendar => views::calendar::paint(self, c, env, theme),
-                    ViewId::Screen(slot) => views::custom::paint(self, slot, c, env, theme),
-                }
-                let (i, n) = self.nav_position();
-                views::paint_nav(c, i, n, theme);
-            }
-        }
-    }
-
-    /// Makes the next [`App::draw`] repaint the whole screen, e.g. after the
-    /// display was re-initialised.
-    pub const fn invalidate(&mut self) {
-        self.cache_screen = None;
-    }
-
-    /// Repaints whatever changed since the last call. The first call, a
-    /// change of screen and a change of theme repaint everything.
-    ///
-    /// # Errors
-    /// When the display fails; the next call repaints what is missing.
-    pub fn draw<D>(&mut self, display: &mut D, env: &Env) -> Result<(), D::Error>
-    where
-        D: DrawTarget<Color = Rgb565>,
-    {
-        if self.asleep {
-            return Ok(());
-        }
-        let showing = self.showing(env);
-        let theme = self.theme();
-        let regions = self.regions(showing, env);
-        let cache_id = Some((showing, theme.key()));
-        let full = self.cache_screen != cache_id || self.cache.len() != regions.len();
-
-        let mut buf = std::mem::take(&mut self.buf);
-        let mut paint = |rect: Rectangle| {
-            gfx::render(display, &mut buf, rect, |c| {
-                self.paint(showing, c, env, &theme);
-            })
-        };
-        let result = if full {
-            paint(self::screen())
-        } else {
-            regions
-                .iter()
-                .zip(&self.cache)
-                .filter(|(region, cached)| region.key != **cached)
-                .try_for_each(|(region, _)| paint(region.rect))
-        };
-        self.buf = buf;
-        result?;
-        self.cache = regions.iter().map(|r| r.key).collect();
-        self.cache_screen = cache_id;
-        Ok(())
     }
 }
 
@@ -588,6 +545,7 @@ impl App {
 mod tests {
     use super::*;
     use crate::model::LocalTime;
+    use embedded_graphics::prelude::Point;
 
     fn env_at(now_ms: u64, hour: u8) -> Env {
         Env {
@@ -614,7 +572,11 @@ mod tests {
             sleep_secs: 0,
             ..Settings::default()
         };
-        App::new(settings, Some(Calibration::identity()))
+        App::new(
+            crate::Profile::FREENOVE_35,
+            settings,
+            Some(Calibration::identity(480, 320)),
+        )
     }
 
     /// Ticks every 30 ms from `from` to `to` and records each view change.
@@ -623,7 +585,8 @@ mod tests {
         let mut t = from;
         while t < to {
             let before = app.view();
-            app.tick(&env_at(t, hour), None);
+            app.touch(None, &env_at(t, hour));
+            app.tick(&env_at(t, hour));
             if app.view() != before {
                 seen.push((t / 1000, app.view()));
             }
@@ -660,7 +623,8 @@ mod tests {
         let mut a = rotating(&["home", "forecast", "calendar"]);
         run(&mut a, 0, 70_000, 12);
         // A tap pauses rotation for a minute.
-        a.tick(&env_at(70_000, 12), Some(RawTouch { x: 10, y: 10 }));
+        a.touch(Some(RawTouch { x: 10, y: 10 }), &env_at(70_000, 12));
+        a.tick(&env_at(70_000, 12));
         let seen = run(&mut a, 70_030, 135_000, 12);
         assert_eq!(seen.first().map(|s| s.0), Some(130));
 
@@ -685,10 +649,10 @@ mod tests {
                     x: x as u16,
                     y: y as u16,
                 };
-                a.tick(&env_at(t + i * 30, 12), Some(raw));
+                a.touch(Some(raw), &env_at(t + i * 30, 12));
             }
-            a.tick(&env_at(t + 200, 12), None);
-            a.tick(&env_at(t + 230, 12), None);
+            a.touch(None, &env_at(t + 200, 12));
+            a.touch(None, &env_at(t + 230, 12));
         };
         swipe(&mut a, 0, (400, 160), (100, 160));
         assert_eq!(a.view(), ViewId::Forecast);
@@ -700,12 +664,61 @@ mod tests {
     }
 
     #[test]
+    fn an_action_on_a_dark_screen_only_wakes_it() {
+        let mut a = rotating(&["home"]);
+        a.sleep();
+        a.act(Action::Next, &env_at(1_000, 12));
+        assert!(!a.is_asleep());
+        assert_eq!(a.view(), ViewId::Home, "the wake-up press did nothing else");
+        a.act(Action::Next, &env_at(2_000, 12));
+        assert_eq!(a.view(), ViewId::Forecast);
+    }
+
+    #[test]
+    fn any_button_leaves_the_setup_screen() {
+        let mut a = App::new(Profile::CROWPANEL_579, Settings::default(), None);
+        let mut env = env_at(0, 12);
+        env.net = NetState::Setup {
+            ssid: "Herald-1234".into(),
+            password: "secret".into(),
+            ip: "192.168.71.1".into(),
+        };
+        assert_eq!(a.showing(&env), Showing::WifiSetup);
+        a.act(Action::Home, &env);
+        assert_eq!(a.showing(&env), Showing::View(ViewId::Home));
+    }
+
+    #[test]
+    fn upside_down_turns_touch_positions() {
+        let tap = |upside_down: bool| {
+            let mut touch = Touch::new(Some(Calibration::identity(views::W, views::H)));
+            let raw = Some(RawTouch { x: 10, y: 20 });
+            for t in 0..4 {
+                touch.feed(raw, upside_down, t * 30);
+            }
+            touch.feed(None, upside_down, 120);
+            match touch.feed(None, upside_down, 150) {
+                Fed::Action(Action::Tap(p)) => p,
+                Fed::Nothing | Fed::Contact | Fed::Action(_) | Fed::Calibrated(_) => {
+                    panic!("expected a tap")
+                }
+            }
+        };
+        assert_eq!(tap(false), Point::new(10, 20));
+        assert_eq!(tap(true), Point::new(views::W - 11, views::H - 21));
+    }
+
+    #[test]
     fn a_calibration_for_another_layout_is_redone() {
-        let mut old = Calibration::identity();
+        let mut old = Calibration::identity(480, 320);
         old.screen = (320, 480);
-        let a = App::new(Settings::default(), Some(old));
-        assert!(a.calibrate.is_some());
-        let a = App::new(Settings::default(), Some(Calibration::identity()));
-        assert!(a.calibrate.is_none());
+        let a = App::new(crate::Profile::FREENOVE_35, Settings::default(), Some(old));
+        assert!(a.calibrating());
+        let a = App::new(
+            crate::Profile::FREENOVE_35,
+            Settings::default(),
+            Some(Calibration::identity(480, 320)),
+        );
+        assert!(!a.calibrating());
     }
 }

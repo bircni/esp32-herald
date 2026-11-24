@@ -15,7 +15,7 @@ use crate::{
     },
     gesture::{Dir, Gesture},
     gfx,
-    model::{Env, NetState, screen},
+    model::{Env, NetState},
 };
 
 /// Bodies larger than this are rejected. Transports should not read more,
@@ -204,9 +204,6 @@ impl Transport for Http {
             ("DELETE", "/api/weather") => Ok(Command::SetWeather(None)),
             ("POST", "/api/tap") => {
                 let req: TapRequest = parse_json(req.body)?;
-                if !screen().contains(Point::new(req.x, req.y)) {
-                    return Err(reject(400, "x/y must lie on the screen"));
-                }
                 let p = Point::new(req.x, req.y);
                 Ok(Command::Touch(if req.long {
                     Gesture::LongPress(p)
@@ -291,6 +288,26 @@ fn state_etag(state: &Value) -> String {
     format!("\"{:016x}\"", gfx::str_key(&stable.to_string()))
 }
 
+/// What an e-paper board shows, as a black-and-white BMP image.
+fn frame_bmp(app: &App, req: &Request<'_>) -> Response {
+    let Some((rev, frame)) = &app.shown_frame else {
+        return Response::json(
+            404,
+            &json!({ "error": "this display has no picture to send" }),
+        );
+    };
+    let etag = format!("\"f{rev}\"");
+    if req.if_none_match == Some(etag.as_str()) {
+        return Response::not_modified(etag);
+    }
+    Response {
+        status: 200,
+        content_type: "image/bmp",
+        headers: vec![("ETag", etag), ("Cache-Control", "no-cache".to_owned())],
+        body: Cow::Owned(frame.to_bmp()),
+    }
+}
+
 /// Handles one HTTP request.
 pub fn handle(app: &mut App, env: &Env, req: &Request<'_>) -> Response {
     let path = req.path.split('?').next().unwrap_or("");
@@ -304,6 +321,9 @@ pub fn handle(app: &mut App, env: &Env, req: &Request<'_>) -> Response {
         if setup && path != "/" && path != "/index.html" && !path.starts_with("/api/") {
             return Response::redirect("/");
         }
+    }
+    if req.method == "GET" && path == "/api/frame.bmp" {
+        return frame_bmp(app, req);
     }
     match command::handle(&Http, app, env, req) {
         Ok(Reply::Asset {
@@ -355,7 +375,11 @@ mod tests {
     };
 
     fn app() -> App {
-        App::new(Settings::default(), Some(Calibration::identity()))
+        App::new(
+            crate::Profile::FREENOVE_35,
+            Settings::default(),
+            Some(Calibration::identity(480, 320)),
+        )
     }
 
     fn env(now_ms: u64) -> Env {
@@ -694,7 +718,7 @@ mod tests {
     fn items_expire_and_can_alert() {
         let mut a = app();
         call(&mut a, 0, "POST", "/api/view", r#"{"view":"calendar"}"#);
-        a.tick(&env(301_000), None);
+        a.tick(&env(301_000));
         assert!(a.is_asleep());
         let body = r#"{"text":"Door open","color":"yellow","ttl":10}"#;
         call(&mut a, 301_000, "PUT", "/api/items/door", body);
@@ -708,9 +732,9 @@ mod tests {
                 .contains(&Effect::Beep(crate::model::Beep::Notice))
         );
 
-        a.tick(&env(311_999), None);
+        a.tick(&env(311_999));
         assert_eq!(a.feed().len(), 1);
-        a.tick(&env(312_000), None);
+        a.tick(&env(312_000));
         assert!(a.feed().is_empty());
     }
 
@@ -741,7 +765,7 @@ mod tests {
         assert_eq!(call(&mut a, 0, "PUT", "/api/weather", "{}").0, 400);
 
         // Weather that is not refreshed disappears instead of going stale.
-        a.tick(&env(crate::weather::STALE_MS), None);
+        a.tick(&env(crate::weather::STALE_MS));
         assert!(a.weather().is_none());
         assert_eq!(call(&mut a, 0, "DELETE", "/api/weather", "").0, 200);
     }

@@ -4,17 +4,19 @@ The details behind the [README](../README.md): setting the device up, the web ap
 
 ## First boot on real hardware
 
-1. **Picture check.** The calibration screen should appear upright in
-   landscape, white text on black. If not, change the `LCD_*` constants in
-   `board.rs`: upside down → `LCD_ROTATION` (`Deg90` ↔ `Deg270`), mirrored
-   text → `LCD_MIRRORED`, negative colours → `LCD_INVERTED`, red and blue
-   swapped → `LCD_BGR`.
+1. **Picture check.** On the TFT board the calibration screen should
+   appear in landscape, white text on black. If the text is mirrored, the
+   colours look negative or red and blue are swapped, change `LCD_MIRRORED`,
+   `LCD_INVERTED` or `LCD_BGR` in `firmware/boards/freenove-35/src/board.rs`.
+   A board standing the other way round is turned later with "Upside down"
+   on the web app's Display page (touch follows).
 2. **Touch calibration.** Press and hold each of the four crosses. If presses
    are not noticed, lower `TOUCH_PRESSURE_MIN` in `board.rs`.
 3. **WiFi setup.** The display shows a network name (`Herald-XXXX`) and a
    password. Join it with a phone: the setup page opens by itself (captive
    portal), otherwise open the address shown. Enter your 2.4 GHz WiFi; the
-   device restarts and connects. A tap on the screen skips setup.
+   device restarts and connects. A tap on the screen (or any button)
+   skips setup.
 4. **Web app.** Open the device by its address or host name (`herald` by
    default; your router's DNS usually knows it, mDNS answers `herald.local`).
 
@@ -33,7 +35,10 @@ costs nothing; all rendering happens in the browser.
 - **Feed:** the items, with their age, and removal.
 - **Screens:** your custom screens, and a builder with live preview that
   publishes them (see [Custom screens](guide.md#custom-screens)).
-- **Display:** theme, accent colour, brightness, sleep, rotation, night mode.
+- **Display:** display language (English or German; the web app stays
+  English), orientation (on the e-paper: upright or landscape), upside down,
+  theme, accent colour, brightness, sleep, rotation, night mode. Controls a
+  board cannot use are hidden.
 - **Connections:** WiFi, host name, time zone, time server, MQTT, and the
   topic reference with your prefix filled in.
 - **System:** firmware version and slot, update upload, restart, settings
@@ -62,7 +67,7 @@ it for `sleep_secs` (at least 30 s); a touch on a dark screen only wakes it.
 
 ![A custom screen with window and door icons, a grid of temperatures and a countdown](images/screen-house.png)
 
-A screen is a retained MQTT message on `<prefix>/screen/<name>` (or
+A screen is a retained MQTT message on `<prefix>/data/screen/<name>` (or
 `PUT /api/screens/<name>`), with an optional title and 1 to 6 widgets laid out
 automatically: 1 full, 2 side by side, 3 in a row, 4 as 2x2, 5–6 as 3x2. Up to
 8 screens, 4 KB each; `lifetime` (seconds) removes a screen that is not

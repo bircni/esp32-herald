@@ -3,7 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::model::weekday_of;
+use crate::model::{LocalTime, weekday_of};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -35,6 +35,52 @@ impl Condition {
         })
     }
 
+    /// A condition from free text such as "Bewölkung zunehmend" or "light
+    /// rain showers", by keywords; cloudy when nothing matches.
+    #[must_use]
+    pub fn guess(text: &str) -> Self {
+        const WORDS: [(&[&str], Condition); 8] = [
+            (
+                &["gewitter", "thunder", "lightning", "storm"],
+                Condition::Thunder,
+            ),
+            (
+                &["schnee", "snow", "hagel", "hail", "sleet", "graupel"],
+                Condition::Snow,
+            ),
+            (&["niesel", "drizzle"], Condition::Drizzle),
+            (
+                &["regen", "rain", "schauer", "shower", "pouring"],
+                Condition::Rain,
+            ),
+            (&["nebel", "fog", "mist", "dunst", "haze"], Condition::Fog),
+            (
+                &[
+                    "heiter",
+                    "leicht bew",
+                    "teilweise",
+                    "wechselnd",
+                    "partly",
+                    "few clouds",
+                ],
+                Condition::PartlyCloudy,
+            ),
+            (
+                &["wölk", "wolk", "bedeckt", "cloud", "overcast"],
+                Condition::Cloudy,
+            ),
+            (
+                &["sonn", "klar", "clear", "sun", "fair", "dry", "trocken"],
+                Condition::Clear,
+            ),
+        ];
+        let text = text.to_lowercase();
+        WORDS
+            .iter()
+            .find(|(words, _)| words.iter().any(|w| text.contains(w)))
+            .map_or(Self::Cloudy, |(_, c)| *c)
+    }
+
     #[must_use]
     pub const fn label(self) -> &'static str {
         match self {
@@ -62,6 +108,13 @@ pub fn deg(celsius: f32) -> String {
 pub struct Hour {
     /// Local hour of day, 0..=23.
     pub hour: u8,
+    /// Local date, when the sender gave one.
+    #[serde(skip)]
+    pub date: Option<(u16, u8, u8)>,
+    /// Hours since 1970-01-01 00:00 local time, set when the weather
+    /// arrives with the clock set; `None` never counts as past.
+    #[serde(skip)]
+    pub stamp: Option<i64>,
     pub temp_c: f32,
     /// Probability of precipitation in percent.
     pub rain_pct: u8,
@@ -98,17 +151,83 @@ pub struct Weather {
     pub days: Vec<Day>,
 }
 
+/// Days since 1970-01-01 (proleptic Gregorian calendar).
+fn days_from_civil(y: u16, m: u8, d: u8) -> i64 {
+    let (m, d) = (i64::from(m.clamp(1, 12)), i64::from(d));
+    let y = i64::from(y) - i64::from(m <= 2);
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let doy = (153 * (m + if m > 2 { -3 } else { 9 }) + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    era * 146_097 + doe - 719_468
+}
+
+/// `LocalTime` as hours since 1970-01-01 00:00.
+fn hour_stamp(t: LocalTime) -> i64 {
+    days_from_civil(t.year, t.month, t.day) * 24 + i64::from(t.hour)
+}
+
+impl Weather {
+    /// Dates every hour of the forecast, using `now` for hours sent without
+    /// a date (the first one today, the next day after each midnight),
+    /// then drops the hours that have passed.
+    pub fn date_hours(&mut self, now: Option<&LocalTime>) {
+        let Some(now) = now else {
+            return;
+        };
+        let today = days_from_civil(now.year, now.month, now.day);
+        let mut day = today;
+        let mut last: Option<u8> = None;
+        for h in &mut self.hours {
+            if last.is_some_and(|l| h.hour < l) {
+                day += 1;
+            }
+            last = Some(h.hour);
+            let d = h.date.map_or(day, |(y, m, d)| days_from_civil(y, m, d));
+            h.stamp = Some(d * 24 + i64::from(h.hour));
+        }
+        let first = self.upcoming_from(*now);
+        self.hours.drain(..first);
+        self.hours.truncate(HOURS);
+    }
+
+    fn upcoming_from(&self, now: LocalTime) -> usize {
+        let current = hour_stamp(now);
+        self.hours
+            .iter()
+            .position(|h| h.stamp.is_none_or(|s| s >= current))
+            .unwrap_or(self.hours.len())
+    }
+
+    /// The forecast hours from the current one on.
+    #[must_use]
+    pub fn upcoming(&self, now: Option<&LocalTime>) -> &[Hour] {
+        now.map_or(&self.hours[..], |now| {
+            &self.hours[self.upcoming_from(*now)..]
+        })
+    }
+}
+
 /// Weather not updated for this long is dropped rather than shown stale.
 pub const STALE_MS: u64 = 3 * 60 * 60 * 1000;
 /// Hours and days kept from a message.
 pub const HOURS: usize = 12;
+/// Hours read from a message: forecasts often start at midnight, and the
+/// past ones are dropped once the date is known.
+const HOURS_IN: usize = 48;
 pub const DAYS: usize = 4;
 
-/// `2026-11-21` -> weekday, 0 = Monday
-fn weekday_of_iso(iso: &str) -> Option<u8> {
+/// `2026-11-21` (or a date-time starting with it) -> (2026, 11, 21)
+fn date_of(iso: &str) -> Option<(u16, u8, u8)> {
     let y = iso.get(0..4)?.parse().ok()?;
     let m = iso.get(5..7)?.parse().ok()?;
     let d = iso.get(8..10)?.parse().ok()?;
+    Some((y, m, d))
+}
+
+/// `2026-11-21` -> weekday, 0 = Monday
+fn weekday_of_iso(iso: &str) -> Option<u8> {
+    let (y, m, d) = date_of(iso)?;
     Some(weekday_of(y, m, d))
 }
 
@@ -149,6 +268,8 @@ pub struct Pushed {
 struct PushedHour {
     #[serde(deserialize_with = "crate::de::number")]
     hour: u8,
+    /// `YYYY-MM-DD`, or an ISO date-time; optional.
+    date: Option<String>,
     #[serde(deserialize_with = "crate::de::number")]
     temp: f64,
     /// Probability of precipitation in percent.
@@ -174,8 +295,15 @@ const fn yes() -> bool {
     true
 }
 
+/// Never fails: names outside Home Assistant's list (other integrations
+/// send free text, also in German) are guessed from their words, and
+/// anything unrecognised counts as cloudy rather than losing the forecast.
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "same shape as the other field parsers"
+)]
 fn condition(name: &str) -> Result<Condition, String> {
-    Condition::from_name(name).ok_or_else(|| format!("unknown condition: {name}"))
+    Ok(Condition::from_name(name).unwrap_or_else(|| Condition::guess(name)))
 }
 
 fn temp(v: f64) -> Result<f32, String> {
@@ -204,13 +332,21 @@ impl Pushed {
         let hours = self
             .hourly
             .iter()
-            .take(HOURS)
+            .take(HOURS_IN)
             .map(|h| {
                 if h.hour > 23 {
                     return Err(format!("hour must be 0..=23: {}", h.hour));
                 }
+                let date = match &h.date {
+                    Some(d) => {
+                        Some(date_of(d).ok_or_else(|| format!("date must be YYYY-MM-DD: {d}"))?)
+                    }
+                    None => None,
+                };
                 Ok(Hour {
                     hour: h.hour,
+                    date,
+                    stamp: None,
                     temp_c: temp(h.temp)?,
                     rain_pct: h.rain.clamp(0.0, 100.0) as u8,
                     condition: condition(&h.condition)?,
@@ -305,7 +441,7 @@ mod tests {
     fn pushed_weather_is_checked() {
         for bad in [
             r#"{"condition":"sunny"}"#,
-            r#"{"temp":4,"condition":"tornado"}"#,
+            r#"{"temp":"warm","condition":"sunny"}"#,
             r#"{"temp":400,"condition":"sunny"}"#,
             r#"{"temp":4,"condition":"sunny","sunrise":"7am"}"#,
             r#"{"temp":4,"condition":"sunny","hourly":[{"hour":24,"temp":1,"condition":"sunny"}]}"#,
@@ -330,5 +466,71 @@ mod tests {
             assert_eq!(Condition::from_name(name), Some(want), "{name}");
         }
         assert_eq!(Condition::from_name("Sunny"), None);
+    }
+
+    #[test]
+    fn past_hours_are_skipped() {
+        let at = |day, hour| LocalTime {
+            year: 2026,
+            month: 11,
+            day,
+            weekday: 0,
+            hour,
+            minute: 30,
+            second: 0,
+        };
+        // Six-hourly with dates, starting at midnight.
+        let mut w = pushed(
+            r#"{"temp":3,"condition":"sunny","hourly":[
+                {"date":"2026-11-23","hour":1,"temp":1,"condition":"sunny"},
+                {"date":"2026-11-23","hour":7,"temp":1,"condition":"sunny"},
+                {"date":"2026-11-23","hour":13,"temp":1,"condition":"sunny"},
+                {"date":"2026-11-23","hour":19,"temp":1,"condition":"sunny"},
+                {"date":"2026-11-24","hour":1,"temp":1,"condition":"sunny"}]}"#,
+        )
+        .unwrap();
+        w.date_hours(Some(&at(23, 13)));
+        let hours: Vec<u8> = w.hours.iter().map(|h| h.hour).collect();
+        assert_eq!(hours, [13, 19, 1], "the current hour stays");
+        let later: Vec<u8> = w
+            .upcoming(Some(&at(23, 20)))
+            .iter()
+            .map(|h| h.hour)
+            .collect();
+        assert_eq!(later, [1], "hours pass after the weather arrived");
+        assert_eq!(w.upcoming(None).len(), 3, "no clock, no filtering");
+
+        // Without dates: the first hour is today, midnight starts the next day.
+        let mut w = pushed(
+            r#"{"temp":3,"condition":"sunny","hourly":[
+                {"hour":22,"temp":1,"condition":"sunny"},
+                {"hour":23,"temp":1,"condition":"sunny"},
+                {"hour":0,"temp":1,"condition":"sunny"}]}"#,
+        )
+        .unwrap();
+        w.date_hours(Some(&at(23, 22)));
+        let late: Vec<u8> = w
+            .upcoming(Some(&at(24, 0)))
+            .iter()
+            .map(|h| h.hour)
+            .collect();
+        assert_eq!(late, [0]);
+    }
+
+    #[test]
+    fn free_text_conditions_are_guessed() {
+        for (text, want) in [
+            ("Bewölkung zunehmend", Condition::Cloudy),
+            ("Leicht bewölkt", Condition::PartlyCloudy),
+            ("Sunny", Condition::Clear),
+            ("dry", Condition::Clear),
+            ("Leichter Regenschauer", Condition::Rain),
+            ("Schneefall", Condition::Snow),
+            ("Gewitter mit Regen", Condition::Thunder),
+            ("Nebel", Condition::Fog),
+            ("something else", Condition::Cloudy),
+        ] {
+            assert_eq!(Condition::guess(text), want, "{text}");
+        }
     }
 }

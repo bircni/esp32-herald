@@ -1,17 +1,17 @@
+# ESP-IDF settings for every board. Each board adds its own in
+# boards/<board>/sdkconfig.defaults (flash size, PSRAM, console).
+
 # The UI runs on the main task and renders text and JSON there.
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=20480
 CONFIG_ESP_SYSTEM_EVENT_TASK_STACK_SIZE=4096
 CONFIG_FREERTOS_IDLE_TASK_STACKSIZE=4096
 CONFIG_PTHREAD_TASK_STACK_SIZE_DEFAULT=8192
 
-# Full speed; the board runs on USB power.
+# Full speed; the boards run on USB power.
 CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
 
 # 1 ms tick so short sleeps in the UI loop are accurate.
 CONFIG_FREERTOS_HZ=1000
-
-# 4 MB module, no OTA: one large application partition (see partitions.csv).
-CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
 
 # WiFi buffers and A-MPDU stay at ESP-IDF's defaults. Cutting them to save
 # RAM made access points (seen with WPA3) queue frames for seconds: pings of
@@ -26,8 +26,8 @@ CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
 # WiFi and the TCP/IP stack on core 0.
 CONFIG_ESP_MAIN_TASK_AFFINITY_CPU1=y
 
-# Smaller firmware (measured: 1.61 MB -> 1.51 MB). Error names stay in the
-# log (about 8 KB) as they make debugging much easier.
+# Smaller firmware (measured on the ESP32: 1.61 MB -> 1.51 MB). Error names
+# stay in the log (about 8 KB) as they make debugging much easier.
 # C printf without float formatting; Rust formatting is unaffected.
 CONFIG_NEWLIB_NANO_FORMAT=y
 # ESP-IDF assertions still stop the device, without their message strings.

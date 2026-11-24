@@ -43,10 +43,62 @@ jobs:
           toolchain: stable
           components: rustfmt
       # The firmware needs the Xtensa toolchain to build; formatting does not.
-      # crates/firmware/rust-toolchain.toml selects the ESP toolchain, which
+      # firmware/rust-toolchain.toml selects the ESP toolchain, which
       # this runner does not have; rustfmt is the same on stable.
       - name: cargo fmt
-        working-directory: crates/firmware
+        working-directory: firmware
         env:
           RUSTUP_TOOLCHAIN: stable
-        run: rustfmt --edition 2024 --check src/*.rs
+        run: rustfmt --edition 2024 --check core/src/*.rs boards/*/src/*.rs
+
+  firmware:
+    name: Firmware (${{ matrix.board }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # One entry per crate in firmware/boards; see docs/adding-a-board.md.
+        board: [freenove-35, crowpanel-579]
+    defaults:
+      run:
+        working-directory: firmware
+    steps:
+      - uses: actions/checkout@v7
+      # The Xtensa Rust fork, named "esp" as firmware/rust-toolchain.toml
+      # expects, with ldproxy for the std targets.
+      - uses: esp-rs/xtensa-toolchain@v1.7.0
+        with:
+          default: true
+          buildtargets: esp32,esp32s3
+          ldproxy: true
+      - name: Install espflash
+        run: |
+          curl -sSfL -o /tmp/espflash.zip \
+            https://github.com/esp-rs/espflash/releases/download/v4.7.0/espflash-x86_64-unknown-linux-gnu.zip
+          unzip -o /tmp/espflash.zip -d "$HOME/.cargo/bin"
+          chmod +x "$HOME/.cargo/bin/espflash"
+      # ESP-IDF (checkout and tools) is shared by all boards; building it
+      # takes most of a cold run.
+      - uses: actions/cache@v6.1.0
+        with:
+          path: firmware/.embuild
+          key: esp-idf-${{ runner.os }}-v5.5.5-${{ hashFiles('firmware/Cargo.lock') }}
+          restore-keys: esp-idf-${{ runner.os }}-v5.5.5-
+      - uses: actions/cache@v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            firmware/target
+          key: firmware-${{ matrix.board }}-${{ hashFiles('firmware/Cargo.lock') }}
+          restore-keys: firmware-${{ matrix.board }}-
+
+      - name: clippy
+        run: make clippy-${{ matrix.board }}
+      - name: build and image
+        run: make image-${{ matrix.board }}
+      - uses: actions/upload-artifact@v7.0.2
+        with:
+          name: herald-${{ matrix.board }}
+          path: firmware/target/${{ matrix.board }}.bin
+          if-no-files-found: error

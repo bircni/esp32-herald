@@ -7,7 +7,11 @@
 //! cargo run -p simulator -- --setup           # start in WiFi setup mode
 //! cargo run -p simulator -- --demo            # sample feed items and weather
 //! cargo run -p simulator -- --screenshots DIR # render every screen to PNG, no window
+//! cargo run -p simulator -- --board crowpanel-579  # another board (default freenove-35)
 //! ```
+//!
+//! Boards without touch use the keyboard: the arrow keys are the rotary
+//! switch, Enter presses it, Escape is the EXIT button and M the MENU button.
 
 use std::{
     fs,
@@ -25,11 +29,12 @@ use chrono::{Datelike, Local, Timelike};
 use embedded_graphics::{pixelcolor::Rgb565, prelude::*};
 use embedded_graphics_simulator::{
     OutputSettings, OutputSettingsBuilder, SimulatorDisplay, SimulatorEvent, Window,
-    sdl2::MouseButton,
+    sdl2::{Keycode, MouseButton},
 };
 use ui::{
-    App, Calibration, Effect, Env, Led, LocalTime, NetState, RawTouch, SCREEN_H, SCREEN_W,
-    Settings, api,
+    Action, App, Calibration, Effect, Env, Led, LocalTime, NetState, Profile, RawTouch, Settings,
+    api,
+    present::{Frame, FramePresenter, Refresh, RegionPresenter},
 };
 
 /// Prints a line like the firmware's log and keeps it for `/api/log`.
@@ -160,6 +165,8 @@ struct Args {
     demo: bool,
     /// No window: the app runs and draws off-screen, for tests.
     headless: bool,
+    /// The board to simulate.
+    board: Profile,
     port: u16,
     screenshots: Option<PathBuf>,
 }
@@ -170,6 +177,7 @@ fn parse_args() -> Result<Args, String> {
         setup: false,
         demo: false,
         headless: false,
+        board: Profile::FREENOVE_35,
         port: 8080,
         screenshots: None,
     };
@@ -180,6 +188,13 @@ fn parse_args() -> Result<Args, String> {
             "--setup" => args.setup = true,
             "--demo" => args.demo = true,
             "--headless" => args.headless = true,
+            "--board" => {
+                let value = it.next().ok_or("--board needs a name")?;
+                args.board = Profile::by_name(&value).ok_or_else(|| {
+                    let names: Vec<_> = Profile::ALL.iter().map(|p| p.name).collect();
+                    format!("unknown board {value}; known: {}", names.join(", "))
+                })?;
+            }
             "--port" => {
                 let value = it.next().ok_or("--port needs a number")?;
                 args.port = value.parse().map_err(|_| format!("bad port: {value}"))?;
@@ -198,7 +213,7 @@ fn main() {
         Ok(a) => a,
         Err(e) => {
             eprintln!(
-                "{e}\nusage: simulator [--calibrate] [--setup] [--demo] [--headless] [--port N] [--screenshots DIR]"
+                "{e}\nusage: simulator [--calibrate] [--setup] [--demo] [--headless] [--board NAME] [--port N] [--screenshots DIR]"
             );
             std::process::exit(2);
         }
@@ -219,9 +234,10 @@ fn main() {
         .filter(|s: &Settings| s.validate().is_ok())
         .unwrap_or_default();
     // The mouse already reports screen coordinates.
-    let calibration = (!args.calibrate).then(Calibration::identity);
+    let board = args.board;
+    let calibration = (!args.calibrate).then(|| Calibration::identity(board.width, board.height));
     let shared = Arc::new(Shared {
-        app: Mutex::new(App::new(settings, calibration)),
+        app: Mutex::new(App::new(board, settings, calibration)),
         net: Mutex::new(if args.setup {
             setup_net()
         } else {
@@ -244,6 +260,8 @@ fn main() {
     run_mqtt(Arc::clone(&shared));
     if args.headless {
         run_headless(&shared);
+    } else if board.frame {
+        run_frame(&shared);
     } else {
         run_window(&shared, args.calibrate);
     }
@@ -311,7 +329,8 @@ fn output_settings() -> OutputSettings {
 /// values look like those of a real resistive panel (a different scale and
 /// offset per axis), so the calibration screen has real work to do.
 fn to_raw(p: Point, fake_adc: bool) -> RawTouch {
-    let (x, y) = (p.x.clamp(0, SCREEN_W - 1), p.y.clamp(0, SCREEN_H - 1));
+    let size = Profile::FREENOVE_35;
+    let (x, y) = (p.x.clamp(0, size.width - 1), p.y.clamp(0, size.height - 1));
     if fake_adc {
         RawTouch {
             x: (x * 11 + 250) as u16,
@@ -327,14 +346,16 @@ fn to_raw(p: Point, fake_adc: bool) -> RawTouch {
 
 /// The app loop without a window: ticks and draws off-screen.
 fn run_headless(shared: &Shared) {
-    let mut display = SimulatorDisplay::<Rgb565>::new(Size::new(SCREEN_W as u32, SCREEN_H as u32));
+    let mut display = SimulatorDisplay::<Rgb565>::new(ui::views::area().size);
+    let mut present = RegionPresenter::default();
     loop {
         let env = shared.env();
         {
             let mut app = shared.app.lock().unwrap_or_else(PoisonError::into_inner);
-            app.tick(&env, None);
+            app.tick(&env);
             shared.apply_effects(&mut app);
-            let Ok(()) = app.draw(&mut display, &env);
+            let Ok(()) = present.draw(&mut app, &mut display, &env);
+            drop(app);
         }
         thread::sleep(TICK);
     }
@@ -345,12 +366,13 @@ fn run_headless(shared: &Shared) {
     reason = "of the window events only the left mouse button and quitting matter"
 )]
 fn run_window(shared: &Shared, fake_adc: bool) {
-    let size = Size::new(SCREEN_W as u32, SCREEN_H as u32);
+    let size = ui::views::area().size;
     let mut display = SimulatorDisplay::<Rgb565>::new(size);
     let dark = SimulatorDisplay::<Rgb565>::new(size);
     let mut window = Window::new("Herald simulator", &output_settings());
     let mut touch: Option<Point> = None;
     let mut led = Led::Off;
+    let mut present = RegionPresenter::default();
 
     loop {
         let frame_start = Instant::now();
@@ -358,9 +380,10 @@ fn run_window(shared: &Shared, fake_adc: bool) {
         let asleep = {
             let mut app = shared.app.lock().unwrap_or_else(PoisonError::into_inner);
             let raw = touch.map(|p| to_raw(p, fake_adc));
-            app.tick(&env, raw);
+            app.touch(raw, &env);
+            app.tick(&env);
             shared.apply_effects(&mut app);
-            let Ok(()) = app.draw(&mut display, &env);
+            let Ok(()) = present.draw(&mut app, &mut display, &env);
             let now_led = app.led();
             if now_led != led {
                 led = now_led;
@@ -387,6 +410,100 @@ fn run_window(shared: &Shared, fake_adc: bool) {
             }
         }
         thread::sleep(TICK.saturating_sub(frame_start.elapsed()));
+    }
+}
+
+/// The e-paper board: redraws once a second like the firmware, and logs
+/// each refresh the panel would do.
+#[expect(
+    clippy::wildcard_enum_match_arm,
+    reason = "of the window events only a few keys and quitting matter"
+)]
+fn run_frame(shared: &Shared) {
+    let size = {
+        let app = shared.app.lock().unwrap_or_else(PoisonError::into_inner);
+        app.layout().area().size
+    };
+    let mut display = SimulatorDisplay::<Rgb565>::new(size);
+    let mut window = Window::new("Herald e-paper", &output_settings());
+    // Enough rows for one pass in either orientation.
+    let mut present = FramePresenter::new(size.width.max(size.height) as usize);
+    let mut next_render = Instant::now();
+    loop {
+        let env = shared.env();
+        if Instant::now() >= next_render {
+            let next = {
+                let mut app = shared.app.lock().unwrap_or_else(PoisonError::into_inner);
+                app.tick(&env);
+                shared.apply_effects(&mut app);
+                let next = present.next(&mut app, &env);
+                drop(app);
+                next
+            };
+            if let Some((frame, kind)) = next {
+                say!(
+                    "[epaper] {} refresh",
+                    if kind == Refresh::Full {
+                        "full"
+                    } else {
+                        "partial"
+                    }
+                );
+                let frame_size = Size::new(frame.width() as u32, frame.height() as u32);
+                if frame_size != display.size() {
+                    // Turned: a window of the new shape.
+                    display = SimulatorDisplay::new(frame_size);
+                    window = Window::new("Herald e-paper", &output_settings());
+                }
+                show_frame(&mut display, &frame);
+                shared
+                    .app
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .set_shown_frame(frame);
+            }
+            next_render = Instant::now() + Duration::from_secs(1);
+        }
+        window.update(&display);
+        for event in window.events() {
+            let action = match event {
+                SimulatorEvent::Quit => return,
+                SimulatorEvent::KeyDown {
+                    keycode,
+                    repeat: false,
+                    ..
+                } => match keycode {
+                    // As on the board: the rotary switch, EXIT and MENU.
+                    Keycode::Up | Keycode::Left => Action::Previous,
+                    Keycode::Down | Keycode::Right => Action::Next,
+                    Keycode::Return | Keycode::Space | Keycode::Escape => Action::Home,
+                    Keycode::M => Action::Refresh,
+                    _ => continue,
+                },
+                _ => continue,
+            };
+            let env = shared.env();
+            shared
+                .app
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .act(action, &env);
+            next_render = Instant::now();
+        }
+        thread::sleep(TICK);
+    }
+}
+
+fn show_frame(display: &mut SimulatorDisplay<Rgb565>, frame: &Frame) {
+    for y in 0..frame.height() {
+        for x in 0..frame.width() {
+            let color = if frame.black(x, y) {
+                Rgb565::new(4, 8, 4)
+            } else {
+                Rgb565::new(28, 57, 27)
+            };
+            let Ok(()) = Pixel(Point::new(x, y), color).draw(display);
+        }
     }
 }
 
@@ -496,6 +613,7 @@ impl MqttConnection {
         let transport = config.transport();
         let topics = config.subscriptions();
         let status = config.status_topic();
+        let old_topics = config.old_topics();
         let error_topic = config.error_topic();
         let url = config.url();
         thread::spawn(move || {
@@ -516,6 +634,14 @@ impl MqttConnection {
                             true,
                             ui::mqtt::ONLINE,
                         );
+                        for topic in &old_topics {
+                            let _ = subscriber.try_publish(
+                                topic.as_str(),
+                                QoS::AtLeastOnce,
+                                true,
+                                Vec::new(),
+                            );
+                        }
                     }
                     Ok(Event::Incoming(Packet::Publish(p))) => {
                         let env = shared.env();
@@ -567,11 +693,11 @@ impl MqttConnection {
 }
 
 /// Follows the MQTT settings, like the firmware's network thread does, and
-/// publishes the state.
+/// publishes what changed.
 fn run_mqtt(shared: Arc<Shared>) {
     thread::spawn(move || {
         let mut current: Option<MqttConnection> = None;
-        let mut publisher = ui::mqtt::StatePublisher::default();
+        let mut reporter = ui::mqtt::Reporter::default();
         loop {
             let wanted = ui::mqtt::Config::from_settings(
                 shared
@@ -585,12 +711,14 @@ fn run_mqtt(shared: Arc<Shared>) {
                     old.close();
                 }
                 current = wanted.map(|config| MqttConnection::open(&shared, config));
-                publisher.reset();
             }
             let connected = current
                 .as_ref()
                 .map(|c| c.connected.load(Ordering::Relaxed));
             *shared.mqtt.lock().unwrap_or_else(PoisonError::into_inner) = connected;
+            if connected != Some(true) {
+                reporter.reset();
+            }
             if let (Some(c), Some(true)) = (&current, connected) {
                 let qos = rumqttc::QoS::AtLeastOnce;
                 let outbox = std::mem::take(
@@ -606,20 +734,16 @@ fn run_mqtt(shared: Arc<Shared>) {
                     let _ = c.client.try_publish(c.config.log_topic(), qos, false, line);
                 }
                 let env = shared.env();
-                let payload = publisher.due(
+                let due = reporter.due(
                     &shared.app.lock().unwrap_or_else(PoisonError::into_inner),
                     &env,
                 );
-                if let Some(payload) = payload {
-                    let _ = c.client.try_publish(
-                        c.config.state_topic(),
-                        rumqttc::QoS::AtMostOnce,
-                        true,
-                        payload,
-                    );
+                for (report, payload) in due {
+                    let topic = c.config.report_topic(report);
+                    let _ = c
+                        .client
+                        .try_publish(topic, rumqttc::QoS::AtMostOnce, false, payload);
                 }
-            } else {
-                publisher.reset();
             }
             thread::sleep(Duration::from_secs(1));
         }
@@ -652,15 +776,112 @@ const DEMO_SCREENS: [(&str, &str); 2] = [
     ),
 ];
 
+/// Feed texts as long as Home Assistant entity names get.
+fn long_items(app: &mut App, env: &Env) -> Result<(), String> {
+    for (id, text) in [
+        ("door.terrace", "Living room terrace door open"),
+        ("window.bedroom", "Upstairs bedroom window (left) tilted"),
+        ("door.garage", "Garage door"),
+        (
+            "lock.garden",
+            "Basement laundry room garden door unlocked since noon",
+        ),
+    ] {
+        let body = format!(r#"{{"text":"{text}","color":"yellow","age":4000}}"#);
+        request(app, env, "PUT", &format!("/api/items/{id}"), &body)?;
+    }
+    Ok(())
+}
+
 /// Weather as Home Assistant would push it (Berlin, 2026-11-21), for the
 /// demo data and the screenshots.
 const SAMPLE_WEATHER: &str = r#"{"temp":6.4,"condition":"cloudy","is_day":false,"sunrise":"07:38","sunset":"16:05","hourly":[{"hour":17,"temp":6.4,"rain":23,"condition":"cloudy","is_day":false},{"hour":18,"temp":6.2,"rain":40,"condition":"cloudy","is_day":false},{"hour":19,"temp":5.9,"rain":35,"condition":"rainy","is_day":false},{"hour":20,"temp":5.7,"rain":18,"condition":"rainy","is_day":false},{"hour":21,"temp":5.5,"rain":13,"condition":"rainy","is_day":false},{"hour":22,"temp":5.3,"rain":10,"condition":"cloudy","is_day":false},{"hour":23,"temp":5.2,"rain":20,"condition":"cloudy","is_day":false},{"hour":0,"temp":4.9,"rain":33,"condition":"cloudy","is_day":false},{"hour":1,"temp":4.8,"rain":45,"condition":"rainy","is_day":false},{"hour":2,"temp":4.8,"rain":45,"condition":"rainy","is_day":false},{"hour":3,"temp":4.7,"rain":28,"condition":"cloudy","is_day":false},{"hour":4,"temp":4.5,"rain":13,"condition":"partlycloudy","is_day":false}],"daily":[{"date":"2026-11-21","min":0.6,"max":6.7,"condition":"rainy"},{"date":"2026-11-22","min":2.1,"max":4.9,"condition":"rainy"},{"date":"2026-11-23","min":-0.6,"max":3.0,"condition":"snowy"},{"date":"2026-11-24","min":-1.0,"max":1.7,"condition":"cloudy"}]}"#;
+
+/// The e-paper layout: the dashboard, custom screens and setup.
+fn epaper_screenshots(dir: &Path, env: &mut Env) -> Result<usize, String> {
+    let settings = Settings {
+        theme: ui::model::ThemeKind::Light,
+        ..Settings::default()
+    };
+    let app = &mut App::new(Profile::CROWPANEL_579, settings, None);
+    let size = app.layout().area().size;
+    let mut display = SimulatorDisplay::<Rgb565>::new(size);
+    let mut present = FramePresenter::new(size.height as usize);
+    let mut count = 0;
+    let mut shot = |app: &App, env: &Env, name: &str| -> Result<(), String> {
+        show_frame(&mut display, &present.render(app, env));
+        count += 1;
+        let file = dir.join(format!("epaper-{count:02}-{name}.png"));
+        display
+            .to_rgb_output_image(&output_settings())
+            .save_png(&file)
+            .map_err(|e| format!("{}: {e}", file.display()))
+    };
+    env.net = connected_net();
+    run(app, env, 60, None);
+    request(app, env, "DELETE", "/api/items", "")?;
+    app.clear_weather();
+    post(app, env, "/api/view", r#"{"view":"home"}"#)?;
+    shot(app, env, "empty")?;
+    demo(app, env)?;
+    post(app, env, "/api/view", r#"{"view":"home"}"#)?;
+    shot(app, env, "dashboard")?;
+    for i in 0..6 {
+        request(
+            app,
+            env,
+            "PUT",
+            &format!("/api/items/extra{i}"),
+            r#"{"text":"Another notification","color":"grey"}"#,
+        )?;
+    }
+    shot(app, env, "overflow")?;
+    request(app, env, "DELETE", "/api/items", "")?;
+    long_items(app, env)?;
+    shot(app, env, "long")?;
+    for (name, _) in DEMO_SCREENS {
+        post(app, env, "/api/view", &format!(r#"{{"view":"{name}"}}"#))?;
+        shot(app, env, &format!("screen-{name}"))?;
+    }
+    env.net = setup_net();
+    run(app, env, 60, None);
+    shot(app, env, "setup")?;
+
+    // Landscape: the wide layout.
+    post(app, env, "/api/settings", r#"{"orientation":"landscape"}"#)?;
+    let size = app.layout().area().size;
+    let mut display = SimulatorDisplay::<Rgb565>::new(size);
+    let mut present = FramePresenter::new(size.width as usize);
+    let mut shot = |app: &App, env: &Env, name: &str| -> Result<(), String> {
+        show_frame(&mut display, &present.render(app, env));
+        count += 1;
+        let file = dir.join(format!("epaper-{count:02}-wide-{name}.png"));
+        display
+            .to_rgb_output_image(&output_settings())
+            .save_png(&file)
+            .map_err(|e| format!("{}: {e}", file.display()))
+    };
+    shot(app, env, "setup")?;
+    env.net = connected_net();
+    run(app, env, 60, None);
+    post(app, env, "/api/view", r#"{"view":"home"}"#)?;
+    shot(app, env, "dashboard")?;
+    for (name, _) in DEMO_SCREENS {
+        post(app, env, "/api/view", &format!(r#"{{"view":"{name}"}}"#))?;
+        shot(app, env, &format!("screen-{name}"))?;
+    }
+    post(app, env, "/api/settings", r#"{"language":"de"}"#)?;
+    post(app, env, "/api/view", r#"{"view":"home"}"#)?;
+    shot(app, env, "de-dashboard")?;
+    Ok(count)
+}
 
 /// Lets animations settle, with an optional finger on the screen.
 fn run(app: &mut App, env: &mut Env, ms: u64, touch: Option<(i32, i32)>) {
     for _ in 0..ms / 30 {
         env.now_ms += 30;
-        app.tick(env, touch.map(|(x, y)| to_raw(Point::new(x, y), true)));
+        app.touch(touch.map(|(x, y)| to_raw(Point::new(x, y), true)), env);
+        app.tick(env);
     }
     app.take_effects();
 }
@@ -673,8 +894,8 @@ fn run(app: &mut App, env: &mut Env, ms: u64, touch: Option<(i32, i32)>) {
 )]
 fn screenshots(dir: &Path) -> Result<(), String> {
     fs::create_dir_all(dir).map_err(|e| e.to_string())?;
-    let mut display = SimulatorDisplay::<Rgb565>::new(Size::new(SCREEN_W as u32, SCREEN_H as u32));
-    let mut app = App::new(Settings::default(), None);
+    let mut display = SimulatorDisplay::<Rgb565>::new(ui::views::area().size);
+    let mut app = App::new(Profile::FREENOVE_35, Settings::default(), None);
     let mut env = Env {
         now_ms: 0,
         local: Some(LocalTime {
@@ -692,8 +913,9 @@ fn screenshots(dir: &Path) -> Result<(), String> {
         ..Env::default()
     };
     let mut count = 0;
+    let mut present = RegionPresenter::default();
     let mut shot = |app: &mut App, env: &Env, name: &str| -> Result<(), String> {
-        let Ok(()) = app.draw(&mut display, env);
+        let Ok(()) = present.draw(app, &mut display, env);
         count += 1;
         let file = dir.join(format!("{count:02}-{name}.png"));
         display
@@ -726,6 +948,9 @@ fn screenshots(dir: &Path) -> Result<(), String> {
         )?;
     }
     shot(&mut app, &env, "home-overflow")?;
+    request(&mut app, &env, "DELETE", "/api/items", "")?;
+    long_items(&mut app, &env)?;
+    shot(&mut app, &env, "home-long")?;
     request(&mut app, &env, "DELETE", "/api/items", "")?;
     demo(&mut app, &env)?;
 
@@ -790,10 +1015,19 @@ fn screenshots(dir: &Path) -> Result<(), String> {
         run(&mut app, &mut env, 1500, None);
         shot(&mut app, &env, &format!("light-{name}"))?;
     }
+    post(&mut app, &env, "/api/settings", r#"{"language":"de"}"#)?;
+    for name in ["home", "forecast", "calendar"] {
+        view(&mut app, &env, name)?;
+        run(&mut app, &mut env, 1500, None);
+        shot(&mut app, &env, &format!("de-{name}"))?;
+    }
+    post(&mut app, &env, "/api/settings", r#"{"language":"en"}"#)?;
 
     env.net = setup_net();
     run(&mut app, &mut env, 60, None);
     shot(&mut app, &env, "wifi-setup")?;
+
+    count += epaper_screenshots(dir, &mut env)?;
 
     println!("{count} screenshots written to {}", dir.display());
     Ok(())

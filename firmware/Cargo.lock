@@ -822,17 +822,39 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 
 [[package]]
-name = "herald-firmware"
+name = "herald-crowpanel-579"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "embedded-graphics",
  "embuild",
  "esp-idf-svc",
+ "herald-esp",
  "log",
- "mipidsi",
+ "ui",
+]
+
+[[package]]
+name = "herald-esp"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "esp-idf-svc",
+ "log",
  "serde",
  "serde_json",
+ "ui",
+]
+
+[[package]]
+name = "herald-freenove-35"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "embuild",
+ "esp-idf-svc",
+ "herald-esp",
+ "log",
+ "mipidsi",
  "ui",
 ]
 

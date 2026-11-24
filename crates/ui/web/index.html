@@ -50,6 +50,9 @@ main{padding:28px 36px 120px;max-width:1000px;width:100%}
 .screen{position:relative;aspect-ratio:3/2;overflow:hidden;border-radius:4px;cursor:pointer;touch-action:pan-y;user-select:none;-webkit-user-select:none}
 .dev{position:absolute;left:0;top:0;width:480px;height:320px;transform-origin:0 0;font-family:"Helvetica Neue",Helvetica,Arial,sans-serif;overflow:hidden}
 .dev>*{position:absolute}
+body.no-backlight .needs-backlight,body.mono .needs-color,body.no-touch .needs-touch,body:not(.no-touch) .no-touch-only,body:not(.frame) .needs-frame,body:not(.rotatable) .needs-rotate{display:none}
+.screen.framed{margin:0 auto;cursor:default;background:#fff}
+.screen.framed img{display:block;width:100%;height:100%;image-rendering:pixelated}
 .sleep{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.7);color:#cfd4da;font-size:14px;pointer-events:none}
 .mirror-hint{font-size:13px;color:var(--muted);margin-top:10px}
 .controls{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px;align-items:center}
@@ -150,12 +153,13 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
           <button class="icon" id="prev" aria-label="Previous view">&#8592;</button>
           <div class="seg" id="viewbar" role="group" aria-label="Views"></div>
           <button class="icon" id="next" aria-label="Next view">&#8594;</button>
-          <button id="power" aria-pressed="false">Display on</button>
+          <button id="power" class="needs-backlight" aria-pressed="false">Display on</button>
         </div>
-        <p class="mirror-hint">Drawn by this page from the device's state. Click it to tap the real screen, drag sideways to swipe, hold to open the device menu.</p>
+        <p class="mirror-hint needs-touch">Drawn by this page from the device's state. Click it to tap the real screen, drag sideways to swipe, hold to open the device menu.</p>
+        <p class="mirror-hint no-touch-only">What the display shows right now. Use the buttons above to change the page.</p>
       </div>
       <div>
-        <div class="field"><label for="o-bright">Brightness <span id="o-bright-v"></span></label><input type="range" id="o-bright" min="5" max="100" step="5"></div>
+        <div class="field needs-backlight"><label for="o-bright">Brightness <span id="o-bright-v"></span></label><input type="range" id="o-bright" min="5" max="100" step="5"></div>
         <dl class="facts" id="facts" style="margin-top:18px"></dl>
       </div>
     </div>
@@ -203,10 +207,13 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
     <div class="head"><h1>Display</h1></div>
     <h2>Look</h2>
     <div class="form">
+      <div class="field needs-rotate"><label for="d-orient">Orientation</label><select id="d-orient" data-key="orientation"><option value="default">As the board comes</option><option value="upright">Upright</option><option value="landscape">Landscape</option></select></div>
+      <div class="field"><label for="d-lang">Display language</label><select id="d-lang" data-key="language"><option value="en">English</option><option value="de">Deutsch</option></select></div>
       <div class="field"><label for="d-theme">Theme</label><select id="d-theme" data-key="theme"><option value="dark">Dark</option><option value="light">Light</option></select></div>
-      <div class="field"><label for="d-accent">Accent colour</label><input type="color" id="d-accent" data-key="accent_color" data-type="color"></div>
-      <div class="field"><label for="d-bright">Brightness <span data-out="d-bright"></span></label><input type="range" id="d-bright" data-key="brightness" data-type="int" min="5" max="100" step="5"></div>
-      <div class="field"><label for="d-sleep">Turn off after (s without touch, 0 = never)</label><input type="number" id="d-sleep" data-key="sleep_secs" data-type="int" min="0" max="86400"></div>
+      <label class="check"><input type="checkbox" id="d-flip" data-key="upside_down" data-type="bool"> Upside down, for a board standing the other way round</label>
+      <div class="field needs-color"><label for="d-accent">Accent colour</label><input type="color" id="d-accent" data-key="accent_color" data-type="color"></div>
+      <div class="field needs-backlight"><label for="d-bright">Brightness <span data-out="d-bright"></span></label><input type="range" id="d-bright" data-key="brightness" data-type="int" min="5" max="100" step="5"></div>
+      <div class="field needs-backlight"><label for="d-sleep">Turn off after (s without touch, 0 = never)</label><input type="number" id="d-sleep" data-key="sleep_secs" data-type="int" min="0" max="86400"></div>
     </div>
     <h2>Rotation</h2>
     <p class="muted">Steps through the chosen views on its own. It waits a minute after a touch. The same time in both fields means all day.</p>
@@ -217,6 +224,7 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
       <div class="field"><label for="d-runtil">Until</label><input type="time" id="d-runtil" data-key="rotate_until"></div>
       <div class="field wide"><span class="lbl">Views</span><div class="chips" id="d-rviews" data-key="rotate_views" data-type="views"></div></div>
     </div>
+    <div class="needs-backlight">
     <h2>Night</h2>
     <p class="muted">Dims or turns off the screen between two times. A touch, or an item sent with <code>wake</code>, lights it up for the usual time.</p>
     <label class="check"><input type="checkbox" id="d-night" data-key="night" data-type="bool"> Use night mode</label>
@@ -224,6 +232,7 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
       <div class="field"><label for="d-nfrom">From</label><input type="time" id="d-nfrom" data-key="night_from"></div>
       <div class="field"><label for="d-nuntil">Until</label><input type="time" id="d-nuntil" data-key="night_until"></div>
       <div class="field"><label for="d-nbright">Brightness at night <span data-out="d-nbright"></span></label><input type="range" id="d-nbright" data-key="night_brightness" data-type="int" min="0" max="100" step="5"></div>
+    </div>
     </div>
   </section>
 
@@ -389,6 +398,8 @@ function col(c){if(!c)return null;if(Array.isArray(c))return`rgb(${c.map(n=>Math
 const deg=v=>v==null?"–":Math.round(v)+"°";
 function ageStr(s){const m=Math.floor(s/60);if(m<1)return"now";if(m<60)return m+"m";if(m<1440)return Math.floor(m/60)+"h "+String(m%60).padStart(2,"0")+"m";return Math.floor(m/1440)+"d "+Math.floor(m%1440/60)+"h"}
 const box=(x,y,w,h)=>`left:${x}px;top:${y}px;width:${w}px;height:${h}px;`;
+const MC=document.createElement("canvas").getContext("2d");
+function tw(s,size){MC.font=`${size}px "Helvetica Neue",Helvetica,Arial,sans-serif`;return MC.measureText(s).width}
 function txt(x,y,s,size,color,align,w,weight){const a=align||"left",ww=w||300,left=a==="center"?x-ww/2:a==="right"?x-ww:x;return`<div style="${box(left,y-size*.62,ww,size*1.25)}font-size:${size}px;line-height:${size*1.25}px;color:${color};text-align:${a};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;${weight?"font-weight:"+weight:""}">${esc(s)}</div>`}
 function icon(x,y,size,paths,color,sw){return`<div style="${box(x,y,size,size)}">${svg(paths,size,color,sw)}</div>`}
 function navDots(t){if(!S||!S.views)return"";const n=S.views.length,sp=14,x0=240-sp*(n-1)/2;return S.views.map((v,i)=>`<div style="${box(x0+i*sp-3.5,309,7,7)}border-radius:50%;background:${v.name===S.view?t.fg:t.rule}"></div>`).join("")}
@@ -401,7 +412,9 @@ function drawHome(t){
   h+=`<div style="${box(14,148,452,1)}background:${t.rule}"></div>`;
   const items=S.items||[],rows=items.length>5?4:5;
   if(!items.length)h+=txt(240,230,"All quiet",20,t.dim,"center",300);
-  items.slice(0,rows).forEach((it,i)=>{const y=171+i*29,c=col(it.color)||COLORS.grey;h+=it.icon&&IC[it.icon]?icon(13,y-9,18,IC[it.icon],c,2.2):`<div style="${box(16,y-6,12,12)}border-radius:50%;background:${c}"></div>`;h+=txt(38,y,it.text,22,t.fg,"left",320)+txt(466,y,it.detail||ageStr(it.age_s),18,t.dim,"right",110)});
+  // One size for all rows, the largest in which every shown text fits.
+  const rz=z=>z>=22?18:15,room=(it,z)=>466-tw(it.detail||ageStr(it.age_s),rz(z))-12-38,fs=[22,18,15].find(z=>items.slice(0,rows).every(it=>tw(it.text,z)<=room(it,z)))||15;
+  items.slice(0,rows).forEach((it,i)=>{const y=171+i*29,c=col(it.color)||COLORS.grey;h+=it.icon&&IC[it.icon]?icon(13,y-9,18,IC[it.icon],c,2.2):`<div style="${box(16,y-6,12,12)}border-radius:50%;background:${c}"></div>`;const r=it.detail||ageStr(it.age_s);h+=txt(38,y,it.text,fs,t.fg,"left",room(it,fs))+txt(466,y,r,rz(fs),t.dim,"right",110)});
   if(items.length>5)h+=txt(38,171+4*29,`+${items.length-4} more`,18,t.dim);
   return h;
 }
@@ -464,6 +477,8 @@ document.querySelectorAll(".screen").forEach(s=>ro.observe(s));
 // Rendering
 function render(){
   if(!S)return;
+  const dv=S.device||{},cl=document.body.classList;
+  cl.toggle("no-touch",dv.touch===false);cl.toggle("no-backlight",dv.backlight===false);cl.toggle("mono",dv.color===false);cl.toggle("frame",!!(dv.frame&&S.frame));cl.toggle("rotatable",!!dv.rotatable);
   const setup=S.net&&S.net.state==="setup";
   $("setup").hidden=!setup;$("shell").hidden=setup;if(setup)return;
   const a=accent(),rgb=parseInt(a.slice(1),16),lum=((rgb>>16)*299+((rgb>>8)&255)*587+(rgb&255)*114)/1000,root=document.documentElement.style;
@@ -478,7 +493,12 @@ function render(){
 function renderOverview(){
   $("o-host").textContent=S.hostname||"Herald";
   const cur=(S.views||[]).find(v=>v.name===S.view);$("o-sub").textContent=cur?(cur.custom?"showing the screen "+S.view:"showing "+S.view):"";
-  const dev=$("dev"),d=drawView(S.view);dev.style.background=d.bg;dev.innerHTML=d.html;fit(dev);
+  const dev=$("dev");
+  if(S.device&&S.device.frame&&S.frame){// the board sends its picture; nothing to draw here
+    const sc=$("screen"),w=S.device.width,h=S.device.height;sc.classList.add("framed");sc.style.aspectRatio=w+"/"+h;sc.style.maxWidth=h>w?"280px":"";dev.hidden=true;let img=$("frame");
+    if(!img){img=document.createElement("img");img.id="frame";img.alt="What the display shows";sc.prepend(img)}
+    const src="/api/frame.bmp?r="+S.frame;if(img.getAttribute("src")!==src)img.src=src;
+  }else{const d=drawView(S.view);dev.style.background=d.bg;dev.innerHTML=d.html;fit(dev)}
   $("sleep").hidden=!S.asleep;
   const vb=$("viewbar"),names=(S.views||[]).map(v=>v.name).join();
   if(vb.dataset.names!==names){vb.dataset.names=names;vb.innerHTML=(S.views||[]).map(v=>`<button data-view="${esc(v.name)}">${esc(v.name[0].toUpperCase()+v.name.slice(1))}</button>`).join("")}
@@ -491,11 +511,11 @@ function renderOverview(){
 }
 function renderFeed(){
   const it=S.items||[];$("f-count").textContent=it.length?it.length+(it.length===1?" item":" items"):"";
-  $("f-topic").textContent=(S.mqtt_prefix||"herald")+"/item/<id>";
+  $("f-topic").textContent=(S.mqtt_prefix||"herald")+"/data/item/<id>";
   $("f-list").innerHTML=it.length?it.map(i=>{const c=col(i.color)||COLORS.grey;return`<li>${i.icon&&IC[i.icon]?`<span class="ic">${svg(IC[i.icon],18,c)}</span>`:`<span class="sw" style="background:${c}"></span>`}<div class="grow"><div class="t">${esc(i.text)}</div><div class="sub">${esc(i.id)}, ${i.detail?esc(i.detail)+", ":""}${i.age_s<60?"just now":ageStr(i.age_s)+" ago"}${i.remaining_s!=null?", disappears in "+ageStr(i.remaining_s).replace("now","under a minute"):""}</div></div><button class="icon" data-del="${esc(i.id)}" aria-label="Remove ${esc(i.text)}">&times;</button></li>`}).join(""):'<li class="empty">Nothing in the feed. Items appear here when another system sends them.</li>';
 }
 function renderScreensList(){
-  $("s-topic").textContent=(S.mqtt_prefix||"herald")+"/screen/<name>";
+  $("s-topic").textContent=(S.mqtt_prefix||"herald")+"/data/screen/<name>";
   const names=Object.keys(screens).sort(),key=JSON.stringify(screens);if($("s-list").dataset.k===key)return;$("s-list").dataset.k=key;
   $("s-list").innerHTML=names.length?names.map(n=>{const s=screens[n]||{},k=(s.widgets||[]).length;return`<li><div class="grow"><div class="t">${esc(s.title||n)}</div><div class="sub">${esc(n)}, ${k} ${k===1?"widget":"widgets"}${s.lifetime?", disappears after "+s.lifetime+" s without an update":""}</div></div><button data-show="${esc(n)}">Show</button><button data-edit="${esc(n)}">Edit</button><button class="icon danger" data-sdel="${esc(n)}" aria-label="Delete ${esc(n)}">&times;</button></li>`}).join(""):'<li class="empty">No screens yet. Create one here, or publish one over MQTT.</li>';
 }
@@ -510,21 +530,25 @@ async function loadLog(){try{const r=await fetch("/api/log",{headers:hdr()}),t=a
 // Topic reference
 let refKey="";
 function renderRef(){
-  const p=S.mqtt_prefix||"herald",h=(settings&&settings.mqtt_host)||"BROKER";if(refKey===p+h)return;refKey=p+h;
-  const P=esc(p),H=esc(h),row=(t,pl,e)=>`<tr><td><code>${P}/${t}</code></td><td>${pl}</td><td>${e}</td></tr>`;
-  $("ref").innerHTML=`<p class="muted">With your prefix <code>${P}</code>. Send states, such as an open window, as retained messages so they come back after a restart.</p>
+  const p=S.mqtt_prefix||"herald",h=(settings&&settings.mqtt_host)||"BROKER",n=S.hostname||"herald";if(refKey===p+h+n)return;refKey=p+h+n;
+  const P=esc(p),H=esc(h),N=esc(n),row=(t,pl,e)=>`<tr><td><code>${P}/${t}</code></td><td>${pl}</td><td>${e}</td></tr>`;
+  $("ref").innerHTML=`<p class="muted">With your prefix <code>${P}</code>. Every display on this prefix reads <code>data</code> and <code>cmd</code>; each reports under <code>state/</code> and its host name, so commands never come back as readings. Send data, such as an open window, as retained messages so it comes back after a restart; send commands not retained.</p>
 <div class="tbl"><table><tr><th>Topic</th><th>Payload</th><th>Effect</th></tr>
-${row("item/&lt;id&gt;","text, or item JSON","adds or updates the item; empty removes it")}
-${row("clear","anything","empties the feed")}
-${row("screen/&lt;name&gt;","screen JSON","adds or updates a screen; empty removes it")}
-${row("weather","weather JSON","replaces the weather; empty removes it")}
-${row("view","<code>home</code>, <code>forecast</code>, <code>calendar</code> or a screen name","switches the view")}
-${row("settings","any settings, e.g. <code>{\"rotate\":true}</code>","changes only those settings")}
-<tr><th colspan="3">Published by the device</th></tr>
-${row("status","<code>online</code> or <code>offline</code>","retained; offline is the last will")}
-${row("state","state JSON","retained, on every change and once a minute")}
-${row("error","<code>{topic, status, error, payload}</code>","why a message was rejected")}
-${row("log","text","warnings and errors from the device")}
+<tr><th colspan="3">Data, usually retained</th></tr>
+${row("data/item/&lt;id&gt;","text, or item JSON","adds or updates the item; empty removes it")}
+${row("data/screen/&lt;name&gt;","screen JSON","adds or updates a screen; empty removes it")}
+${row("data/weather","weather JSON","replaces the weather; empty removes it")}
+<tr><th colspan="3">Commands, not retained</th></tr>
+${row("cmd/clear","anything","empties the feed")}
+${row("cmd/screen","<code>home</code>, <code>forecast</code>, <code>calendar</code> or a screen name","switches what the display shows")}
+${row("cmd/settings","any settings, e.g. <code>{\"rotate\":true}</code>","changes only those settings")}
+<tr><th colspan="3">Published by this display</th></tr>
+${row(`state/${N}/status`,"<code>online</code> or <code>offline</code>","retained; offline is the last will")}
+${row(`state/${N}/state`,"state JSON","when it changes")}
+${row(`state/${N}/settings`,"settings JSON, without passwords","when they change")}
+${row(`state/${N}/screen`,"view or screen name","when the display switches")}
+${row(`state/${N}/error`,"<code>{topic, status, error, payload}</code>","why a message was rejected")}
+${row(`state/${N}/log`,"text","warnings and errors")}
 </table></div>
 <h3>Item</h3><p class="muted small">Plain text works, or JSON where only <code>text</code> is needed. Colour: <code>red</code>, <code>yellow</code>, <code>blue</code>, <code>green</code>, <code>grey</code>, <code>#RRGGBB</code> or <code>[r,g,b]</code>. <code>since</code> is the Unix time the state began, <code>age</code> how long it has lasted, <code>ttl</code> removes it after that many seconds.</p>
 <pre><code>{"text": "Kitchen window open", "color": "red", "icon": "window",
@@ -540,8 +564,8 @@ ${row("log","text","warnings and errors from the device")}
  "hourly": [{"hour": 17, "temp": 3.9, "rain": 40, "condition": "rainy"}],
  "daily": [{"date": "2026-11-22", "min": 1, "max": 6, "condition": "cloudy"}]}</code></pre>
 <h3>From the command line</h3>
-<pre><code>mosquitto_pub -h ${H} -r -t ${P}/item/window.kitchen -m "Kitchen window open"
-mosquitto_pub -h ${H} -r -t ${P}/item/window.kitchen -n      # closed
+<pre><code>mosquitto_pub -h ${H} -r -t ${P}/data/item/window.kitchen -m "Kitchen window open"
+mosquitto_pub -h ${H} -r -t ${P}/data/item/window.kitchen -n      # closed
 mosquitto_sub -h ${H} -t '${P}/#' -v                         # watch everything</code></pre>
 <h3>Home Assistant: a window</h3>
 <pre><code>alias: Herald kitchen window
@@ -551,7 +575,7 @@ triggers:
 actions:
   - action: mqtt.publish
     data:
-      topic: ${P}/item/window.kitchen
+      topic: ${P}/data/item/window.kitchen
       retain: true
       payload: &gt;-
         {% if trigger.to_state.state == 'on' %}
@@ -576,7 +600,7 @@ actions:
     response_variable: daily
   - action: mqtt.publish
     data:
-      topic: ${P}/weather
+      topic: ${P}/data/weather
       retain: true
       payload: &gt;-
         {% set w = 'weather.home' %}
@@ -726,13 +750,13 @@ let brT;$("o-bright").oninput=e=>{const v=+e.target.value;$("o-bright-v").textCo
 $("f-list").addEventListener("click",e=>{const b=e.target.closest("[data-del]");if(b)api("DELETE","/api/items/"+encodeURIComponent(b.dataset.del)).then(()=>{etag="";poll()},err=>toast(err.message))});
 $("f-clear").onclick=()=>{if(confirm("Remove every item from the feed?"))api("DELETE","/api/items").then(()=>{etag="";poll()},err=>toast(err.message))};
 (()=>{const sc=$("screen");let d=null;
-  sc.addEventListener("pointerdown",e=>{d={x:e.clientX,y:e.clientY,t:performance.now()};sc.setPointerCapture(e.pointerId)});
+  sc.addEventListener("pointerdown",e=>{if(S&&S.device&&!S.device.touch)return;d={x:e.clientX,y:e.clientY,t:performance.now()};sc.setPointerCapture(e.pointerId)});
   sc.addEventListener("pointercancel",()=>{d=null});
   sc.addEventListener("pointerup",e=>{if(!d)return;const dx=e.clientX-d.x,dy=e.clientY-d.y,held=performance.now()-d.t,r=sc.getBoundingClientRect();d=null;
     if(Math.abs(dx)>40&&Math.abs(dx)>Math.abs(dy)){act("/api/swipe",{dir:dx<0?"left":"right"});return}
     const x=Math.round(Math.min(479,Math.max(0,(e.clientX-r.left)*480/r.width))),y=Math.round(Math.min(319,Math.max(0,(e.clientY-r.top)*320/r.height)));
     act("/api/tap",{x,y,long:held>650})});
-  sc.addEventListener("keydown",e=>{if(e.key==="ArrowLeft")act("/api/swipe",{dir:"right"});else if(e.key==="ArrowRight")act("/api/swipe",{dir:"left"})});
+  sc.addEventListener("keydown",e=>{if(S&&S.device&&!S.device.touch)return;if(e.key==="ArrowLeft")act("/api/swipe",{dir:"right"});else if(e.key==="ArrowRight")act("/api/swipe",{dir:"left"})});
 })();
 $("w-save").onclick=async()=>{if(!confirm("Save this network and restart the device?"))return;try{await api("POST","/api/wifi",{ssid:$("w-ssid").value,password:$("w-pass").value});toast("Saved. The device restarts now.")}catch(e){toast(e.message)}};
 $("su-save").onclick=async()=>{$("su-err").textContent="";try{await api("POST","/api/wifi",{ssid:$("su-ssid").value,password:$("su-pass").value});$("su-save").disabled=true;$("su-save").textContent="Saved. Herald restarts and joins the network."}catch(e){$("su-err").textContent=e.message}};

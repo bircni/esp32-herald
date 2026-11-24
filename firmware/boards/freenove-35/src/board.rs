@@ -19,6 +19,8 @@
 //! | Amplifier shutdown  | 4    | low = amplifier on                     |
 //! | LED red/green/blue  | 22/16/17 | active low                         |
 
+pub const NAME: &str = "Freenove ESP32 Display 3.5\"";
+
 /// The panel fails above this clock (40 MHz is unreliable on this board).
 pub const LCD_SPI_HZ: u32 = 26_666_666;
 pub const TOUCH_SPI_HZ: u32 = 2_000_000;

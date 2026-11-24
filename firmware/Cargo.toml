@@ -1,5 +1,11 @@
-[package]
-name = "herald-firmware"
+# Firmware for every board. Built apart from the host workspace (repo root)
+# because it needs the Xtensa toolchain and build-std; see the Makefile for
+# one command per board.
+[workspace]
+resolver = "2"
+members = ["core", "boards/*"]
+
+[workspace.package]
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.88"
@@ -8,9 +14,16 @@ license = "MIT"
 repository = "https://github.com/bircni/esp32-herald"
 publish = false
 
-[[bin]]
-name = "herald-firmware"
-harness = false # no host test harness on the target; logic tests live in crates/ui
+[workspace.dependencies]
+herald-esp = { path = "core" }
+ui = { path = "../crates/ui" }
+log = "0.4"
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+mipidsi = "0.10"
+esp-idf-svc = "0.53"
+embuild = "0.33.7"
 
 # Size first, measured on the flashed image: lto + 1 codegen unit saved
 # 73 KB, opt-level "z" another 50 KB. panic = "abort" changes nothing, the
@@ -24,30 +37,7 @@ codegen-units = 1
 debug = true
 opt-level = "z"
 
-[features]
-# For running in Espressif's QEMU, which has no WiFi radio and no touch
-# panel: skips networking and the touch calibration screen.
-qemu = []
-
-# mDNS (`<hostname>.local`) is a separate component since ESP-IDF 5.
-[[package.metadata.esp-idf-sys.extra_components]]
-remote_component = { name = "espressif/mdns", version = "1.15" }
-
-[dependencies]
-ui = { path = "../ui" }
-log = "0.4"
-anyhow = "1"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-embedded-graphics = "0.8"
-mipidsi = "0.10"
-esp-idf-svc = "0.53"
-
-[build-dependencies]
-embuild = "0.33.7"
-
-# Same lints as the workspace (this crate is built outside it).
-[lints.rust]
+[workspace.lints.rust]
 unsafe_code = "deny"
 deprecated = "warn"
 elided_lifetimes_in_paths = "warn"
@@ -59,11 +49,11 @@ unused_extern_crates = "warn"
 unused_import_braces = "warn"
 unused_lifetimes = "warn"
 
-[lints.rustdoc]
+[workspace.lints.rustdoc]
 all = "warn"
 missing_crate_level_docs = "warn"
 
-[lints.clippy]
+[workspace.lints.clippy]
 all = { level = "warn", priority = -1 }
 correctness = { level = "warn", priority = -1 }
 suspicious = { level = "warn", priority = -1 }

@@ -6,7 +6,8 @@ use super::{Region, region};
 use crate::{
     app::App,
     gfx::{self, Align, Canvas, Font},
-    model::{Calibration, Env, NetState, RawTouch, screen},
+    i18n::{Language, Text},
+    model::{Calibration, Env, NetState, RawTouch},
     theme::Theme,
 };
 
@@ -70,7 +71,7 @@ impl CalibrateState {
                 if self.step < TARGETS.len() {
                     return None;
                 }
-                let result = Calibration::from_corners(&TARGETS, &self.raw);
+                let result = Calibration::from_corners(&TARGETS, &self.raw, (super::W, super::H));
                 self.step = 0;
                 self.failed = result.is_none();
                 result
@@ -81,24 +82,32 @@ impl CalibrateState {
 
 pub(crate) fn calibrate_regions(app: &App) -> Vec<Region> {
     let (step, failed) = app
-        .calibrate
+        .touch
         .as_ref()
+        .and_then(|t| t.calibrate.as_ref())
         .map_or((0, false), |s| (s.step as i64, s.failed));
-    vec![region(screen(), &[step, i64::from(failed)])]
+    vec![region(super::area(), &[step, i64::from(failed)])]
 }
 
 pub(crate) fn paint_calibrate(app: &App, c: &mut Canvas<'_>, theme: &Theme) {
-    let Some(state) = app.calibrate.as_ref() else {
+    let Some(state) = app.touch.as_ref().and_then(|t| t.calibrate.as_ref()) else {
         return;
     };
     let center = |c: &mut Canvas<'_>, font, text: &str, y, color| {
         gfx::text(c, font, text, Point::new(240, y), Align::Center, color);
     };
-    center(c, Font::Bold, "Touch calibration", 110, theme.fg);
+    let lang = app.lang();
+    center(
+        c,
+        Font::Bold,
+        lang.text(Text::TouchCalibration),
+        110,
+        theme.fg,
+    );
     center(
         c,
         Font::Small,
-        "Press and hold the centre of the cross",
+        lang.text(Text::PressAndHold),
         145,
         theme.dim,
     );
@@ -110,13 +119,7 @@ pub(crate) fn paint_calibrate(app: &App, c: &mut Canvas<'_>, theme: &Theme) {
         theme.fg,
     );
     if state.failed {
-        center(
-            c,
-            Font::Small,
-            "That did not work, please try again",
-            225,
-            theme.warn,
-        );
+        center(c, Font::Small, lang.text(Text::TryAgain), 225, theme.warn);
     }
     let t = TARGETS[state.step.min(TARGETS.len() - 1)];
     gfx::line(
@@ -142,37 +145,27 @@ pub(crate) fn wifi_regions(env: &Env) -> Vec<Region> {
         }
         NetState::Offline | NetState::Connecting { .. } | NetState::Connected { .. } => 0,
     };
-    vec![region(screen(), &[key])]
+    vec![region(super::area(), &[key])]
 }
 
-pub(crate) fn paint_wifi(c: &mut Canvas<'_>, env: &Env, theme: &Theme) {
+pub(crate) fn paint_wifi(c: &mut Canvas<'_>, env: &Env, theme: &Theme, lang: Language) {
     let NetState::Setup { ssid, password, ip } = &env.net else {
         return;
     };
     let center = |c: &mut Canvas<'_>, font, text: &str, y, color| {
         gfx::text(c, font, text, Point::new(240, y), Align::Center, color);
     };
-    center(c, Font::Large, "WiFi setup", 30, theme.fg);
-    center(c, Font::Small, "1. Join this WiFi network", 72, theme.dim);
+    let t = |t| lang.text(t);
+    center(c, Font::Large, t(Text::WifiSetup), 30, theme.fg);
+    center(c, Font::Small, t(Text::JoinNetwork), 72, theme.dim);
     center(c, Font::Bold, ssid, 96, theme.accent);
-    center(c, Font::Small, "Password", 126, theme.dim);
+    center(c, Font::Small, t(Text::Password), 126, theme.dim);
     center(c, Font::Bold, password, 148, theme.accent);
-    center(c, Font::Small, "2. Open in your browser", 182, theme.dim);
+    center(c, Font::Small, t(Text::OpenInBrowser), 182, theme.dim);
     center(c, Font::Bold, &format!("http://{ip}"), 206, theme.fg);
-    center(
-        c,
-        Font::Small,
-        "3. Enter your home WiFi (2.4 GHz)",
-        240,
-        theme.dim,
-    );
-    center(
-        c,
-        Font::Small,
-        "Tap to continue without WiFi",
-        296,
-        theme.dim,
-    );
+    let enter = format!("{} {}", t(Text::EnterHomeWifi), t(Text::Band));
+    center(c, Font::Small, &enter, 240, theme.dim);
+    center(c, Font::Small, t(Text::TapToContinue), 296, theme.dim);
 }
 
 #[cfg(test)]

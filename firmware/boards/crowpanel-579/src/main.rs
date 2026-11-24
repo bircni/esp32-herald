@@ -1,0 +1,125 @@
+//! Herald on the Elecrow `CrowPanel` ESP32 5.79" e-paper display, used
+//! upright: a black-and-white panel, a rotary switch and two buttons.
+//!
+//! About once a second, and right after a button, the picture is drawn;
+//! when it differs from what the panel shows, the panel refreshes.
+
+mod board;
+mod buttons;
+mod epd;
+
+use std::time::{Duration, Instant};
+
+use anyhow::Result;
+use esp_idf_svc::hal::{
+    delay::FreeRtos,
+    gpio::{AnyIOPin, PinDriver, Pull},
+    spi::{
+        Dma, SpiDeviceDriver, SpiDriver,
+        config::{Config as SpiConfig, DriverConfig},
+    },
+    units::Hertz,
+};
+use herald_esp::Shared;
+use ui::{
+    Action, App, Env, Profile,
+    layout::portrait,
+    present::{FramePresenter, panel},
+};
+
+use crate::{buttons::Buttons, epd::Epd};
+
+/// How often the picture is drawn to see whether it changed.
+const RENDER_INTERVAL: Duration = Duration::from_secs(1);
+
+fn main() -> Result<()> {
+    let (p, start) = herald_esp::start(board::NAME)?;
+
+    // The panel has its own power switch; it stays on for good.
+    let mut power = PinDriver::output(p.pins.gpio7)?;
+    power.set_high()?;
+    core::mem::forget(power);
+    FreeRtos::delay_ms(50);
+
+    let spi = SpiDriver::new(
+        p.spi2,
+        p.pins.gpio12,
+        p.pins.gpio11,
+        None::<AnyIOPin<'static>>,
+        &DriverConfig::new().dma(Dma::Auto(4096)),
+    )?;
+    let device = SpiDeviceDriver::new(
+        spi,
+        Some(p.pins.gpio45),
+        &SpiConfig::new().baudrate(Hertz(board::EPD_SPI_HZ)),
+    )?;
+    let epd = Epd::new(
+        device,
+        PinDriver::output(p.pins.gpio46)?,
+        PinDriver::output(p.pins.gpio47)?,
+        PinDriver::input(p.pins.gpio48, Pull::Floating)?,
+    )?;
+    // EXIT and pressing the switch go home; MENU clears ghosting with a
+    // full refresh; turning the switch pages.
+    let buttons = Buttons::new([
+        (PinDriver::input(p.pins.gpio1, Pull::Up)?, Action::Home),
+        (PinDriver::input(p.pins.gpio2, Pull::Up)?, Action::Refresh),
+        (PinDriver::input(p.pins.gpio4, Pull::Up)?, Action::Next),
+        (PinDriver::input(p.pins.gpio5, Pull::Up)?, Action::Home),
+        (PinDriver::input(p.pins.gpio6, Pull::Up)?, Action::Previous),
+    ]);
+
+    let board = CrowPanel {
+        epd,
+        buttons,
+        // The whole picture in one pass; the buffer goes to PSRAM.
+        present: FramePresenter::new(portrait::H as usize),
+        next_render: Instant::now(),
+    };
+    herald_esp::run(board, p.modem, start)
+}
+
+struct CrowPanel {
+    epd: Epd<'static>,
+    buttons: Buttons<'static>,
+    present: FramePresenter,
+    next_render: Instant,
+}
+
+impl herald_esp::Board for CrowPanel {
+    /// Button polling interval.
+    const TICK: Duration = Duration::from_millis(20);
+    const PROFILE: Profile = Profile::CROWPANEL_579;
+
+    fn input(&mut self, app: &mut App, env: &Env) {
+        for action in self.buttons.poll() {
+            app.act(action, env);
+            // Drawn right away after a button.
+            self.next_render = Instant::now();
+        }
+        app.tick(env);
+    }
+
+    fn present(&mut self, shared: &Shared, env: &Env) {
+        if Instant::now() < self.next_render {
+            return;
+        }
+        self.next_render = Instant::now() + RENDER_INTERVAL;
+        let (next, upside_down) = {
+            let mut app = shared.app();
+            let next = self.present.next(&mut app, env);
+            (next, app.settings().upside_down)
+        };
+        let Some((frame, refresh)) = next else {
+            return;
+        };
+        let memory = panel::ssd1683_cascade(&frame, upside_down);
+        match self.epd.show(&memory, refresh) {
+            Ok(()) => shared.app().set_shown_frame(frame),
+            Err(e) => {
+                log::warn!("e-paper: {e:#}");
+                self.present.force_full();
+            }
+        }
+    }
+}

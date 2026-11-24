@@ -1,0 +1,31 @@
+[package]
+name = "herald-crowpanel-579"
+description = "Herald on the Elecrow CrowPanel ESP32 5.79\" e-paper display."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "herald-crowpanel-579"
+harness = false # no host test harness on the target; logic tests live in crates/ui
+
+# Paths are relative to the firmware workspace.
+[package.metadata.esp-idf-sys]
+esp_idf_sdkconfig_defaults = ["sdkconfig.defaults", "boards/crowpanel-579/sdkconfig.defaults"]
+
+[dependencies]
+herald-esp.workspace = true
+ui.workspace = true
+log.workspace = true
+anyhow.workspace = true
+esp-idf-svc.workspace = true
+
+[build-dependencies]
+embuild.workspace = true
+
+[lints]
+workspace = true

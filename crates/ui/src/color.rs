@@ -22,15 +22,22 @@ pub enum Color {
 }
 
 impl Color {
-    const NAMES: [(&'static str, Self); 8] = [
+    /// Names, then other names senders use for the same (Home Assistant
+    /// templates often say "orange" or "off").
+    const NAMES: [(&'static str, Self); 13] = [
         ("red", Self::Red),
         ("yellow", Self::Yellow),
         ("blue", Self::Blue),
         ("green", Self::Green),
         ("grey", Self::Grey),
-        ("gray", Self::Grey),
         ("white", Self::White),
         ("accent", Self::Accent),
+        ("gray", Self::Grey),
+        ("orange", Self::Yellow),
+        ("amber", Self::Yellow),
+        ("off", Self::Grey),
+        ("none", Self::Grey),
+        ("black", Self::Grey),
     ];
 
     /// A name, or `#RRGGBB` (also without `#`, and `#RGB`).
@@ -155,7 +162,7 @@ impl<'de> Deserialize<'de> for Color {
         match Raw::deserialize(d)? {
             Raw::Text(s) => Self::parse(&s).ok_or_else(|| {
                 de::Error::custom(format!(
-                    "unknown colour {s:?}: use red, yellow, blue, green, grey, white, accent, #RRGGBB or [r,g,b]"
+                    "unknown colour {s:?}: use red, orange, yellow, blue, green, grey, off, white, accent, #RRGGBB or [r,g,b]"
                 ))
             }),
             Raw::Rgb([r, g, b]) => Ok(Self::Rgb(r, g, b)),

@@ -18,6 +18,16 @@ pub mod icons;
 pub mod menu;
 pub mod setup;
 
+/// The size these views are laid out for: the landscape TFT.
+pub const W: i32 = 480;
+pub const H: i32 = 320;
+
+/// The whole screen of this layout.
+#[must_use]
+pub const fn area() -> Rectangle {
+    gfx::rect(0, 0, W as u32, H as u32)
+}
+
 pub struct Region {
     pub rect: Rectangle,
     pub key: u64,

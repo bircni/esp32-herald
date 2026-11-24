@@ -1,6 +1,6 @@
 //! Custom screens: whole views that other machines define, AWTRIX style.
 //!
-//! They arrive as retained MQTT messages (`<prefix>/screen/<name>`) or over
+//! They arrive as retained MQTT messages (`<prefix>/data/screen/<name>`) or over
 //! HTTP, live in RAM, and join navigation and rotation next to the built-in
 //! views. See [`Screen`] for the format.
 

@@ -1,0 +1,37 @@
+[package]
+name = "herald-freenove-35"
+description = "Herald on the Freenove ESP32 Display 3.5\" (FNK0103)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "herald-freenove-35"
+harness = false # no host test harness on the target; logic tests live in crates/ui
+
+# Paths are relative to the firmware workspace.
+[package.metadata.esp-idf-sys]
+esp_idf_sdkconfig_defaults = ["sdkconfig.defaults", "boards/freenove-35/sdkconfig.defaults"]
+
+[features]
+# For running in Espressif's QEMU, which has no WiFi radio and no touch
+# panel: skips networking and the touch calibration screen.
+qemu = []
+
+[dependencies]
+herald-esp.workspace = true
+ui.workspace = true
+log.workspace = true
+anyhow.workspace = true
+mipidsi.workspace = true
+esp-idf-svc.workspace = true
+
+[build-dependencies]
+embuild.workspace = true
+
+[lints]
+workspace = true

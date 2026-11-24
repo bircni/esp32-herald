@@ -17,8 +17,6 @@ use u8g2_fonts::{
     types::{FontColor, HorizontalAlignment, VerticalPosition},
 };
 
-use crate::model::screen;
-
 /// Number of pixels in the band buffer (2 bytes each).
 pub const BAND_PIXELS: usize = 16_000;
 
@@ -95,7 +93,7 @@ pub fn render<D>(
 where
     D: DrawTarget<Color = Rgb565>,
 {
-    let rect = rect.intersection(&screen());
+    let rect = rect.intersection(&display.bounding_box());
     if rect.is_zero_sized() {
         return Ok(());
     }
@@ -254,6 +252,36 @@ pub fn fitting_font(fonts: &[Font], s: &str, width: i32) -> Font {
         .unwrap_or(Font::Small)
 }
 
+/// `text` in lines of at most `width`, broken between words; at most
+/// `max_lines`, the last one cut with ".." if the text goes on.
+#[must_use]
+pub fn wrap(font: Font, text: &str, width: i32, max_lines: usize) -> Vec<String> {
+    let mut lines: Vec<String> = Vec::new();
+    let mut words = text.split_whitespace().peekable();
+    while let Some(word) = words.next() {
+        let mut line = word.to_owned();
+        while let Some(next) = words.peek() {
+            let candidate = format!("{line} {next}");
+            if text_width(font, &candidate) > width {
+                break;
+            }
+            line = candidate;
+            words.next();
+        }
+        if lines.len() + 1 == max_lines && words.peek().is_some() {
+            let rest: Vec<&str> = words.collect();
+            line = format!("{line} {}", rest.join(" "));
+            lines.push(shorten(font, &line, width));
+            return lines;
+        }
+        lines.push(shorten(font, &line, width));
+        if lines.len() == max_lines {
+            break;
+        }
+    }
+    lines
+}
+
 /// `text`, cut with ".." until it fits `width`.
 #[must_use]
 pub fn shorten(font: Font, text: &str, width: i32) -> String {
@@ -361,7 +389,7 @@ mod tests {
         let mut buf = vec![Rgb565::BLACK; 250];
         let region = rect(10, 20, 100, 5);
         render(&mut d, &mut buf, region, |c| {
-            fill(c, screen(), Rgb565::RED);
+            fill(c, rect(0, 0, 320, 480), Rgb565::RED);
             // Partly outside the region: must be clipped, not panic.
             fill(c, rect(100, 22, 50, 50), Rgb565::GREEN);
         })
@@ -388,6 +416,22 @@ mod tests {
         })
         .unwrap();
         assert_eq!(d.calls, 0);
+    }
+
+    #[test]
+    fn wrap_breaks_between_words() {
+        let lines = wrap(Font::Medium, "EG Wohnzimmer Terrassentür zu", 200, 2);
+        assert_eq!(lines, ["EG Wohnzimmer", "Terrassentür zu"]);
+        assert_eq!(wrap(Font::Medium, "short", 200, 2), ["short"]);
+        let lines = wrap(
+            Font::Medium,
+            "one two three four five six seven eight",
+            100,
+            2,
+        );
+        assert_eq!(lines.len(), 2);
+        assert!(lines[1].ends_with(".."), "{lines:?}");
+        assert!(lines.iter().all(|l| text_width(Font::Medium, l) <= 100));
     }
 
     #[test]

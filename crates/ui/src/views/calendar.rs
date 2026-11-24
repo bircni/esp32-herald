@@ -10,7 +10,8 @@ use super::{
 use crate::{
     app::App,
     gfx::{self, Align, Canvas, Font},
-    model::{Env, LocalTime, days_in_month, weekday_abbr, weekday_of},
+    i18n::{Language, Text},
+    model::{Env, LocalTime, days_in_month, weekday_of},
     theme::Theme,
 };
 
@@ -46,7 +47,7 @@ pub(crate) fn paint(app: &App, c: &mut Canvas<'_>, env: &Env, theme: &Theme) {
         gfx::text(
             c,
             Font::Medium,
-            "Waiting for the time",
+            app.lang().text(Text::WaitingForTime),
             Point::new(240, 150),
             Align::Center,
             theme.dim,
@@ -56,15 +57,10 @@ pub(crate) fn paint(app: &App, c: &mut Canvas<'_>, env: &Env, theme: &Theme) {
     let left = |c: &mut Canvas<'_>, font, text: &str, y, color| {
         gfx::text(c, font, text, Point::new(LEFT_X, y), Align::Center, color);
     };
-    left(c, Font::Big, weekday_abbr(t.weekday), 70, theme.dim);
+    let lang = app.lang();
+    left(c, Font::Big, lang.weekday_abbr(t.weekday), 70, theme.dim);
     left(c, Font::Day, &t.day.to_string(), 130, theme.fg);
-    left(
-        c,
-        Font::Medium,
-        &format!("{} {}", t.month_name(), t.year),
-        192,
-        theme.fg,
-    );
+    left(c, Font::Medium, &lang.month_year(&t), 192, theme.fg);
     if let Some(((rh, rm), (sh, sm))) = daylight(app) {
         let line = |c: &mut Canvas<'_>, sym, color, text: &str, y| {
             icons::symbol(c, sym, Point::new(SUN_X, y), 22, 2.0, color);
@@ -86,20 +82,17 @@ pub(crate) fn paint(app: &App, c: &mut Canvas<'_>, env: &Env, theme: &Theme) {
         );
         line(c, Symbol::Moon, theme.dim, &format!("{sh:02}:{sm:02}"), 267);
     }
-    paint_month(c, t, theme);
+    paint_month(c, t, lang, theme);
 }
 
-fn paint_month(c: &mut Canvas<'_>, t: LocalTime, theme: &Theme) {
+fn paint_month(c: &mut Canvas<'_>, t: LocalTime, lang: Language, theme: &Theme) {
     let col = |i: i32| GRID_X + COL_W * i;
-    for (i, name) in ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"]
-        .into_iter()
-        .enumerate()
-    {
+    for i in 0..7u8 {
         gfx::text(
             c,
             Font::Body,
-            name,
-            Point::new(col(i as i32), HEADER_Y),
+            lang.weekday_letters(i),
+            Point::new(col(i32::from(i)), HEADER_Y),
             Align::Center,
             theme.dim,
         );

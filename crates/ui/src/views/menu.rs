@@ -4,7 +4,8 @@ use super::{Region, contains, region};
 use crate::{
     app::App,
     gfx::{self, Align, Canvas, Font},
-    model::{Effect, Env, NetState, ThemeKind, screen},
+    i18n::{Language, Text},
+    model::{Effect, Env, NetState, ThemeKind},
     theme::Theme,
 };
 
@@ -15,20 +16,20 @@ const ROTATE: Rectangle = gfx::rect(12, 198, 222, 50);
 const WIFI: Rectangle = gfx::rect(246, 198, 222, 50);
 const CLOSE: Rectangle = gfx::rect(12, 258, 456, 50);
 
-fn net_line(net: &NetState) -> String {
+fn net_line(net: &NetState, lang: Language) -> String {
     match net {
-        NetState::Offline => "WiFi: offline".into(),
-        NetState::Connecting { ssid } => format!("Connecting to {ssid}"),
+        NetState::Offline => lang.text(Text::WifiOffline).into(),
+        NetState::Connecting { ssid } => lang.connecting(ssid),
         NetState::Connected { ip } => format!("http://{ip}"),
-        NetState::Setup { ssid, .. } => format!("Setup network {ssid}"),
+        NetState::Setup { ssid, .. } => lang.setup_network(ssid),
     }
 }
 
 pub(crate) fn regions(app: &App, env: &Env) -> Vec<Region> {
     vec![region(
-        screen(),
+        super::area(),
         &[
-            gfx::str_key(&net_line(&env.net)),
+            gfx::str_key(&net_line(&env.net, app.lang())),
             i64::from(app.settings.brightness),
             app.settings.theme as i64,
             i64::from(app.settings.rotate),
@@ -38,10 +39,11 @@ pub(crate) fn regions(app: &App, env: &Env) -> Vec<Region> {
 }
 
 pub(crate) fn paint(app: &App, c: &mut Canvas<'_>, env: &Env, theme: &Theme) {
+    let lang = app.lang();
     gfx::text(
         c,
         Font::Large,
-        "Menu",
+        lang.text(Text::Menu),
         Point::new(16, 28),
         Align::Left,
         theme.fg,
@@ -58,7 +60,7 @@ pub(crate) fn paint(app: &App, c: &mut Canvas<'_>, env: &Env, theme: &Theme) {
     gfx::text(
         c,
         Font::Medium,
-        &net_line(&env.net),
+        &net_line(&env.net, lang),
         Point::new(240, 58),
         Align::Center,
         theme.dim,
@@ -83,44 +85,29 @@ pub(crate) fn paint(app: &App, c: &mut Canvas<'_>, env: &Env, theme: &Theme) {
     gfx::text(
         c,
         Font::Medium,
-        &format!("Brightness {}%", app.settings.brightness),
+        &lang.brightness(app.settings.brightness),
         r.center(),
         Align::Center,
         theme.fg,
     );
 
-    entry(
-        c,
-        THEME,
-        match app.settings.theme {
-            ThemeKind::Dark => "Theme: dark",
-            ThemeKind::Light => "Theme: light",
-        },
-    );
-    entry(c, CALIBRATE, "Calibrate touch");
-    entry(
-        c,
-        ROTATE,
-        if app.settings.rotate {
-            "Auto-rotate: on"
-        } else {
-            "Auto-rotate: off"
-        },
-    );
+    entry(c, THEME, lang.theme(app.settings.theme == ThemeKind::Dark));
+    entry(c, CALIBRATE, lang.text(Text::CalibrateTouch));
+    entry(c, ROTATE, lang.rotate(app.settings.rotate));
     if app.menu_confirm_wifi {
         gfx::round_rect(c, WIFI, 14, theme.warn);
         gfx::text(
             c,
             Font::Small,
-            "Tap again to reset WiFi",
+            lang.text(Text::ResetWifiConfirm),
             WIFI.center(),
             Align::Center,
             theme.on_accent,
         );
     } else {
-        entry(c, WIFI, "WiFi setup");
+        entry(c, WIFI, lang.text(Text::WifiSetup));
     }
-    entry(c, CLOSE, "Close");
+    entry(c, CLOSE, lang.text(Text::Close));
 }
 
 pub(crate) fn tap(app: &mut App, p: Point) {

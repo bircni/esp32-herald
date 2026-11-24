@@ -1,39 +1,43 @@
-//! MQTT, modelled on AWTRIX: everything lives under one topic prefix, feed
-//! items are topics of their own, and an empty payload removes one.
+//! MQTT, modelled on AWTRIX: one topic prefix, feed items as topics.
+//!
+//! What goes to the device and what comes from it never share a topic, so a
+//! sender does not hear its own commands back as readings.
 //!
 //! The platforms own the MQTT client; this module maps topics to commands and
 //! decides what to publish.
 //!
-//! | Topic                  | Payload                              |
-//! |------------------------|--------------------------------------|
-//! | `<prefix>/item/<id>`   | item JSON as for HTTP; empty removes |
-//! | `<prefix>/clear`       | anything: empties the feed           |
-//! | `<prefix>/view`        | `home` or `{"view":"home"}`          |
-//! | `<prefix>/settings`    | any subset of the settings           |
-//! | `<prefix>/weather`     | weather JSON, see [`crate::weather::Pushed`]; empty removes |
+//! To the device, shared by every display on the prefix:
 //!
-//! The device publishes `<prefix>/state` (retained JSON, as `GET
-//! /api/state`), `<prefix>/status` (`online`, or `offline` as last will) and
-//! `<prefix>/error` (why a message was rejected, see [`error_payload`]).
+//! | Topic                       | Payload                              |
+//! |-----------------------------|--------------------------------------|
+//! | `<prefix>/data/item/<id>`   | item JSON as for HTTP; empty removes |
+//! | `<prefix>/data/screen/<name>` | custom screen JSON; empty removes  |
+//! | `<prefix>/data/weather`     | weather JSON, see [`crate::weather::Pushed`]; empty removes |
+//! | `<prefix>/cmd/clear`        | anything: empties the feed           |
+//! | `<prefix>/cmd/screen`       | `home` or `{"screen":"home"}`: what to show |
+//! | `<prefix>/cmd/settings`     | any subset of the settings           |
+//!
+//! Whatever arrives is shown; the device does not care whether the broker
+//! kept a message (retained) or it was just sent.
+//!
+//! From the device, under `<prefix>/state/<hostname>/`: `status` (`online`,
+//! or `offline` as last will; the only retained one), `state`, `settings`
+//! and `screen` (each published when it changes), `error` (why a message
+//! was rejected, see [`error_payload`]) and `log` (warnings and errors).
 
 use serde::Deserialize;
-use serde_json::Value;
+use serde_json::{Value, json};
 
 use crate::{
     app::App,
-    command::{
-        Command, Rejection, Transport, check_item_id, parse_item, parse_json, reject, state,
-    },
-    gfx,
-    model::{Env, Settings},
+    command::{Command, Rejection, Transport, check_item_id, parse_item, parse_json, reject},
+    model::{Env, NetState, Settings},
 };
 
 /// Payloads larger than this are rejected.
 pub const MAX_PAYLOAD: usize = 4096;
 pub const ONLINE: &str = "online";
 pub const OFFLINE: &str = "offline";
-/// The state is published when it changes, and at least this often.
-const STATE_INTERVAL_MS: u64 = 60_000;
 
 /// Connection settings; `None` from [`Config::from_settings`] means MQTT is off.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -43,6 +47,8 @@ pub struct Config {
     pub user: String,
     pub password: String,
     pub prefix: String,
+    /// Names this device's own topics under `<prefix>/state/`.
+    pub hostname: String,
 }
 
 impl Config {
@@ -54,6 +60,7 @@ impl Config {
             user: s.mqtt_user.clone(),
             password: s.mqtt_password.clone(),
             prefix: s.mqtt_prefix.clone(),
+            hostname: s.hostname.clone(),
         })
     }
 
@@ -63,45 +70,56 @@ impl Config {
     }
 
     #[must_use]
-    pub fn subscriptions(&self) -> [String; 6] {
+    pub fn subscriptions(&self) -> [String; 4] {
         let p = &self.prefix;
         [
-            format!("{p}/item/+"),
-            format!("{p}/screen/+"),
-            format!("{p}/clear"),
-            format!("{p}/view"),
-            format!("{p}/settings"),
-            format!("{p}/weather"),
+            format!("{p}/data/item/+"),
+            format!("{p}/data/screen/+"),
+            format!("{p}/data/weather"),
+            format!("{p}/cmd/+"),
         ]
+    }
+
+    /// One of this device's own topics.
+    fn own(&self, name: &str) -> String {
+        format!("{}/state/{}/{name}", self.prefix, self.hostname)
     }
 
     /// Where a custom screen lives, retained.
     #[must_use]
     pub fn screen_topic(&self, name: &str) -> String {
-        format!("{}/screen/{name}", self.prefix)
-    }
-
-    /// Warnings and errors from the device's log, not retained.
-    #[must_use]
-    pub fn log_topic(&self) -> String {
-        format!("{}/log", self.prefix)
+        format!("{}/data/screen/{name}", self.prefix)
     }
 
     /// `online` / `offline`, retained; `offline` is the last will.
     #[must_use]
     pub fn status_topic(&self) -> String {
-        format!("{}/status", self.prefix)
-    }
-
-    #[must_use]
-    pub fn state_topic(&self) -> String {
-        format!("{}/state", self.prefix)
+        self.own("status")
     }
 
     /// Rejected messages are reported here, not retained.
     #[must_use]
     pub fn error_topic(&self) -> String {
-        format!("{}/error", self.prefix)
+        self.own("error")
+    }
+
+    /// Warnings and errors from the device's log, not retained.
+    #[must_use]
+    pub fn log_topic(&self) -> String {
+        self.own("log")
+    }
+
+    #[must_use]
+    pub fn report_topic(&self, report: Report) -> String {
+        self.own(report.name())
+    }
+
+    /// Retained topics of older versions, cleared on connecting so they
+    /// do not linger on the broker.
+    #[must_use]
+    pub fn old_topics(&self) -> [String; 2] {
+        let p = &self.prefix;
+        [format!("{p}/state"), format!("{p}/status")]
     }
 
     #[must_use]
@@ -126,8 +144,8 @@ pub struct Mqtt {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct ViewPayload {
-    view: String,
+struct ScreenPayload {
+    screen: String,
 }
 
 impl Transport for Mqtt {
@@ -143,7 +161,7 @@ impl Transport for Mqtt {
             .and_then(|t| t.strip_prefix('/'))
             .ok_or_else(|| reject(404, format!("not our topic: {}", msg.topic)))?;
 
-        if let Some(id) = topic.strip_prefix("item/") {
+        if let Some(id) = topic.strip_prefix("data/item/") {
             check_item_id(id)?;
             return Ok(if is_blank(msg.payload) {
                 Command::DeleteItem(id.into())
@@ -154,7 +172,7 @@ impl Transport for Mqtt {
                 }
             });
         }
-        if let Some(name) = topic.strip_prefix("screen/") {
+        if let Some(name) = topic.strip_prefix("data/screen/") {
             return Ok(if is_blank(msg.payload) {
                 Command::DeleteScreen {
                     name: name.into(),
@@ -170,21 +188,21 @@ impl Transport for Mqtt {
             });
         }
         match topic {
-            "clear" => Ok(Command::ClearItems),
-            "view" => {
+            "data/weather" if is_blank(msg.payload) => Ok(Command::SetWeather(None)),
+            "data/weather" => Ok(Command::SetWeather(Some(parse_json(msg.payload)?))),
+            "cmd/clear" => Ok(Command::ClearItems),
+            "cmd/screen" => {
                 let text = std::str::from_utf8(msg.payload)
-                    .map_err(|_| reject(400, "view must be text"))?
+                    .map_err(|_| reject(400, "screen must be text"))?
                     .trim();
                 let name = if text.starts_with('{') {
-                    parse_json::<ViewPayload>(msg.payload)?.view
+                    parse_json::<ScreenPayload>(msg.payload)?.screen
                 } else {
                     text.to_owned()
                 };
                 Ok(Command::ShowView(name))
             }
-            "settings" => Ok(Command::PatchSettings(parse_json(msg.payload)?)),
-            "weather" if is_blank(msg.payload) => Ok(Command::SetWeather(None)),
-            "weather" => Ok(Command::SetWeather(Some(parse_json(msg.payload)?))),
+            "cmd/settings" => Ok(Command::PatchSettings(parse_json(msg.payload)?)),
             _ => Err(reject(404, format!("unknown topic: {}", msg.topic))),
         }
     }
@@ -212,42 +230,93 @@ pub fn error_payload(msg: &Message<'_>, rejection: &Rejection) -> String {
     .to_string()
 }
 
-/// Decides when `<prefix>/state` is published.
-#[derive(Default)]
-pub struct StatePublisher {
-    last_key: Option<i64>,
-    last_ms: u64,
+/// What the device reports about itself, each on its own topic.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Report {
+    /// A short summary: version, view, network, how many items.
+    State,
+    /// The settings, without secrets.
+    Settings,
+    /// The name of the view or custom screen on the display.
+    Screen,
 }
 
-impl StatePublisher {
-    /// Publish again on the next call, e.g. after reconnecting.
-    pub const fn reset(&mut self) {
-        self.last_key = None;
+impl Report {
+    pub const ALL: [Self; 3] = [Self::State, Self::Settings, Self::Screen];
+
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::State => "state",
+            Self::Settings => "settings",
+            Self::Screen => "screen",
+        }
     }
 
-    /// The payload to publish now, if any.
-    pub fn due(&mut self, app: &App, env: &Env) -> Option<String> {
-        let mut snapshot = state(app, env);
-        let payload = snapshot.to_string();
-        // Ignore what changes all the time, so a publish means news.
-        if let Some(fields) = snapshot.as_object_mut() {
-            fields.remove("uptime_s");
-            fields.remove("time");
-            if let Some(Value::Array(items)) = fields.get_mut("items") {
-                for item in items.iter_mut().filter_map(Value::as_object_mut) {
-                    item.remove("age_s");
-                    item.remove("remaining_s");
-                }
+    /// The payload. Leaves out what changes all the time (uptime, clock,
+    /// signal strength), so a new payload means news.
+    #[must_use]
+    pub fn payload(self, app: &App, env: &Env) -> String {
+        match self {
+            Self::State => {
+                let net = match &env.net {
+                    NetState::Offline => json!({ "state": "offline" }),
+                    NetState::Connecting { ssid } => json!({ "state": "connecting", "ssid": ssid }),
+                    NetState::Connected { ip } => json!({ "state": "connected", "ip": ip }),
+                    NetState::Setup { ssid, .. } => json!({ "state": "setup", "ssid": ssid }),
+                };
+                json!({
+                    "version": crate::VERSION,
+                    "device": app.screen().name,
+                    "view": app.view_name(app.view()),
+                    "asleep": app.is_asleep(),
+                    "night": app.is_night(),
+                    "net": net,
+                    "items": app.feed().len(),
+                    "weather": app.weather().is_some(),
+                    "firmware_slot": env.firmware_slot,
+                })
+                .to_string()
             }
+            Self::Settings => {
+                let mut settings = json!(app.settings());
+                if let Value::Object(fields) = &mut settings {
+                    fields.remove("token");
+                    fields.remove("mqtt_password");
+                }
+                settings.to_string()
+            }
+            Self::Screen => app.view_name(app.view()),
         }
-        let key = gfx::str_key(&snapshot.to_string());
-        let stale = env.now_ms.saturating_sub(self.last_ms) >= STATE_INTERVAL_MS;
-        if self.last_key == Some(key) && !stale {
-            return None;
-        }
-        self.last_key = Some(key);
-        self.last_ms = env.now_ms;
-        Some(payload)
+    }
+}
+
+/// Decides when the reports go out: each when its payload changes, and all
+/// of them after (re)connecting. Nothing is published on a timer.
+#[derive(Default)]
+pub struct Reporter {
+    last: [Option<String>; Report::ALL.len()],
+}
+
+impl Reporter {
+    /// Publish everything on the next call, e.g. after reconnecting.
+    pub fn reset(&mut self) {
+        self.last = Default::default();
+    }
+
+    /// The reports whose payload changed since they were last returned.
+    pub fn due(&mut self, app: &App, env: &Env) -> Vec<(Report, String)> {
+        Report::ALL
+            .iter()
+            .zip(&mut self.last)
+            .filter_map(|(&report, last)| {
+                let payload = report.payload(app, env);
+                (last.as_deref() != Some(payload.as_str())).then(|| {
+                    *last = Some(payload.clone());
+                    (report, payload)
+                })
+            })
+            .collect()
     }
 }
 
@@ -256,11 +325,16 @@ mod tests {
     use super::*;
     use crate::{
         command::{Reply, handle},
-        model::{Calibration, ItemColor},
+        model::{Calibration, Env, ItemColor},
     };
+    use serde_json::Value;
 
     fn app() -> App {
-        App::new(Settings::default(), Some(Calibration::identity()))
+        App::new(
+            crate::Profile::FREENOVE_35,
+            Settings::default(),
+            Some(Calibration::identity(480, 320)),
+        )
     }
 
     fn send(app: &mut App, now_ms: u64, topic: &str, payload: &str) -> Result<Reply, Rejection> {
@@ -286,16 +360,16 @@ mod tests {
     fn items_are_set_and_removed_by_topic() {
         let mut a = app();
         let body = r#"{"text":"Kitchen window open","color":"red"}"#;
-        send(&mut a, 0, "home/herald/item/window.kitchen", body).unwrap();
+        send(&mut a, 0, "home/herald/data/item/window.kitchen", body).unwrap();
         assert_eq!(a.feed()[0].id, "window.kitchen");
         assert_eq!(a.feed()[0].color, ItemColor::Red);
 
-        send(&mut a, 0, "home/herald/item/window.kitchen", "").unwrap();
+        send(&mut a, 0, "home/herald/data/item/window.kitchen", "").unwrap();
         assert!(a.feed().is_empty(), "an empty payload removes the item");
 
-        send(&mut a, 0, "home/herald/item/a", r#"{"text":"a"}"#).unwrap();
-        send(&mut a, 0, "home/herald/item/b", r#"{"text":"b"}"#).unwrap();
-        send(&mut a, 0, "home/herald/clear", "").unwrap();
+        send(&mut a, 0, "home/herald/data/item/a", r#"{"text":"a"}"#).unwrap();
+        send(&mut a, 0, "home/herald/data/item/b", r#"{"text":"b"}"#).unwrap();
+        send(&mut a, 0, "home/herald/cmd/clear", "").unwrap();
         assert!(a.feed().is_empty());
     }
 
@@ -303,30 +377,30 @@ mod tests {
     fn weather_comes_by_topic() {
         let mut a = app();
         let body = r#"{"temp":4.2,"condition":"rainy"}"#;
-        send(&mut a, 0, "home/herald/weather", body).unwrap();
+        send(&mut a, 0, "home/herald/data/weather", body).unwrap();
         let w = a.weather().unwrap();
         assert_eq!(w.temp_c, 4.2);
 
         let bad = send(
             &mut a,
             0,
-            "home/herald/weather",
-            r#"{"temp":4,"condition":"x"}"#,
+            "home/herald/data/weather",
+            r#"{"temp":400,"condition":"sunny"}"#,
         );
         assert_eq!(bad.unwrap_err().status, 400);
         assert!(a.weather().is_some(), "a bad message keeps the weather");
 
-        send(&mut a, 0, "home/herald/weather", "").unwrap();
+        send(&mut a, 0, "home/herald/data/weather", "").unwrap();
         assert!(a.weather().is_none());
     }
 
     #[test]
     fn items_may_be_plain_text_with_any_colour() {
         let mut a = app();
-        send(&mut a, 0, "home/herald/item/door", "Front door open").unwrap();
+        send(&mut a, 0, "home/herald/data/item/door", "Front door open").unwrap();
         assert_eq!(a.feed()[0].text, "Front door open");
         let body = r##"{"text":"Hot","color":"#FF2000","icon":"temperature"}"##;
-        send(&mut a, 0, "home/herald/item/heat", body).unwrap();
+        send(&mut a, 0, "home/herald/data/item/heat", body).unwrap();
         let heat = a.feed().iter().find(|i| i.id == "heat").unwrap();
         assert_eq!(
             heat.color,
@@ -337,18 +411,18 @@ mod tests {
     }
 
     #[test]
-    fn screens_come_and_go_by_retained_topic() {
+    fn screens_come_and_go_by_topic() {
         let mut a = app();
         let body = r#"{"widgets":[{"type":"gauge","label":"CO2","value":"812","max":2000}]}"#;
-        send(&mut a, 0, "home/herald/screen/air", body).unwrap();
+        send(&mut a, 0, "home/herald/data/screen/air", body).unwrap();
         assert!(
             a.take_effects().is_empty(),
             "already on the broker, not published again"
         );
-        send(&mut a, 0, "home/herald/view", "air").unwrap();
+        send(&mut a, 0, "home/herald/cmd/screen", "air").unwrap();
         assert_eq!(a.view_name(a.view()), "air");
-        send(&mut a, 0, "home/herald/screen/air", "").unwrap();
-        send(&mut a, 0, "home/herald/screen/air", "").unwrap();
+        send(&mut a, 0, "home/herald/data/screen/air", "").unwrap();
+        send(&mut a, 0, "home/herald/data/screen/air", "").unwrap();
         assert_eq!(
             a.view(),
             crate::model::ViewId::Home,
@@ -357,14 +431,20 @@ mod tests {
     }
 
     #[test]
-    fn view_accepts_plain_text_and_json() {
+    fn screen_accepts_plain_text_and_json() {
         let mut a = app();
-        send(&mut a, 0, "home/herald/view", "forecast").unwrap();
+        send(&mut a, 0, "home/herald/cmd/screen", "forecast").unwrap();
         assert_eq!(a.view(), crate::model::ViewId::Forecast);
-        send(&mut a, 0, "home/herald/view", r#"{"view":"calendar"}"#).unwrap();
+        send(
+            &mut a,
+            0,
+            "home/herald/cmd/screen",
+            r#"{"screen":"calendar"}"#,
+        )
+        .unwrap();
         assert_eq!(a.view(), crate::model::ViewId::Calendar);
         assert_eq!(
-            send(&mut a, 0, "home/herald/view", "tv")
+            send(&mut a, 0, "home/herald/cmd/screen", "tv")
                 .unwrap_err()
                 .status,
             404
@@ -374,8 +454,14 @@ mod tests {
     #[test]
     fn settings_by_topic_ignore_the_http_token() {
         let mut a = app();
-        send(&mut a, 0, "home/herald/settings", r#"{"token":"s3cret"}"#).unwrap();
-        send(&mut a, 0, "home/herald/settings", r#"{"rotate":true}"#).unwrap();
+        send(
+            &mut a,
+            0,
+            "home/herald/cmd/settings",
+            r#"{"token":"s3cret"}"#,
+        )
+        .unwrap();
+        send(&mut a, 0, "home/herald/cmd/settings", r#"{"rotate":true}"#).unwrap();
         assert!(a.settings().rotate);
     }
 
@@ -385,19 +471,23 @@ mod tests {
         for (topic, payload, status) in [
             ("other/item/x", r#"{"text":"x"}"#, 404),
             ("home/heraldx/item/x", r#"{"text":"x"}"#, 404),
-            ("home/herald/item/a b", r#"{"text":"x"}"#, 400),
-            ("home/herald/item/x", r#"{"text": broken"#, 400),
-            ("home/herald/screen/x", r#"{"widgets":[]}"#, 400),
+            ("home/herald/data/item/a b", r#"{"text":"x"}"#, 400),
+            ("home/herald/data/item/x", r#"{"text": broken"#, 400),
+            ("home/herald/data/screen/x", r#"{"widgets":[]}"#, 400),
             ("home/herald/nope", "", 404),
-            ("home/herald/settings", r#"{"nope":1}"#, 400),
-            ("home/herald/state", "{}", 404),
+            ("home/herald/cmd/nope", "", 404),
+            ("home/herald/cmd/settings", r#"{"nope":1}"#, 400),
+            // Topics of older versions, and the device's own.
+            ("home/herald/item/x", r#"{"text":"x"}"#, 404),
+            ("home/herald/view", "home", 404),
+            ("home/herald/state/herald/screen", "home", 404),
         ] {
             let got = send(&mut a, 0, topic, payload).unwrap_err();
             assert_eq!(got.status, status, "{topic} {payload}: {got:?}");
         }
         let huge = format!(r#"{{"text":"{}"}}"#, "x".repeat(MAX_PAYLOAD));
         assert_eq!(
-            send(&mut a, 0, "home/herald/item/x", &huge)
+            send(&mut a, 0, "home/herald/data/item/x", &huge)
                 .unwrap_err()
                 .status,
             413
@@ -408,7 +498,7 @@ mod tests {
     #[test]
     fn rejections_are_reported_with_the_payload() {
         let mut a = app();
-        let topic = "home/herald/item/window";
+        let topic = "home/herald/data/item/window";
         let payload = r#"{"text":""Küche", "color":"zu""}"#;
         let err = send(&mut a, 0, topic, payload).unwrap_err();
         let report: Value = serde_json::from_str(&error_payload(
@@ -440,32 +530,67 @@ mod tests {
         let mut s = Settings::default();
         assert_eq!(Config::from_settings(&s), None, "off without a host");
         s.mqtt_host = "broker.lan".into();
+        s.hostname = "hall".into();
         let c = Config::from_settings(&s).unwrap();
         assert_eq!(c.url(), "mqtt://broker.lan:1883");
-        assert_eq!(c.subscriptions()[0], "herald/item/+");
-        assert_eq!(c.status_topic(), "herald/status");
-        assert_eq!(c.state_topic(), "herald/state");
-        assert_eq!(c.error_topic(), "herald/error");
+        assert_eq!(
+            c.subscriptions(),
+            [
+                "herald/data/item/+",
+                "herald/data/screen/+",
+                "herald/data/weather",
+                "herald/cmd/+",
+            ]
+        );
+        assert_eq!(c.screen_topic("air"), "herald/data/screen/air");
+        assert_eq!(c.status_topic(), "herald/state/hall/status");
+        assert_eq!(c.error_topic(), "herald/state/hall/error");
+        assert_eq!(c.log_topic(), "herald/state/hall/log");
+        assert_eq!(c.report_topic(Report::Screen), "herald/state/hall/screen");
+        assert_eq!(c.old_topics(), ["herald/state", "herald/status"]);
     }
 
     #[test]
-    fn state_is_published_on_change_and_once_a_minute() {
+    fn reports_go_out_when_they_change() {
         let mut a = app();
-        let mut p = StatePublisher::default();
-        let env = |now_ms| Env {
-            now_ms,
+        let env = Env::default();
+        let mut reporter = Reporter::default();
+        let first: Vec<Report> = reporter.due(&a, &env).into_iter().map(|r| r.0).collect();
+        assert_eq!(first, Report::ALL, "everything once");
+        assert!(reporter.due(&a, &env).is_empty(), "nothing without news");
+
+        let later = Env {
+            now_ms: 3_600_000,
+            rssi: Some(-80),
             ..Env::default()
         };
-        assert!(p.due(&a, &env(0)).is_some(), "first call publishes");
-        assert!(p.due(&a, &env(5_000)).is_none(), "uptime alone is no news");
+        assert!(
+            reporter.due(&a, &later).is_empty(),
+            "uptime and signal are no news"
+        );
 
-        send(&mut a, 6_000, "home/herald/item/x", r#"{"text":"x"}"#).unwrap();
-        let payload = p.due(&a, &env(6_000)).expect("new item");
-        assert!(payload.contains(r#""id":"x""#));
-        assert!(p.due(&a, &env(30_000)).is_none(), "ageing is no news");
-        assert!(p.due(&a, &env(66_000)).is_some(), "but a minute passed");
+        send(&mut a, 0, "home/herald/cmd/screen", "forecast").unwrap();
+        let due = reporter.due(&a, &env);
+        assert_eq!(
+            due.iter().map(|r| r.0).collect::<Vec<_>>(),
+            [Report::State, Report::Screen]
+        );
+        assert_eq!(due[1].1, "forecast");
 
-        p.reset();
-        assert!(p.due(&a, &env(66_100)).is_some(), "after reconnecting");
+        reporter.reset();
+        assert_eq!(reporter.due(&a, &env).len(), 3, "again after reconnecting");
+    }
+
+    #[test]
+    fn settings_reports_hold_no_secrets() {
+        let s = Settings {
+            token: "s3cret".into(),
+            mqtt_password: "hunter2".into(),
+            ..Settings::default()
+        };
+        let a = App::new(crate::Profile::FREENOVE_35, s, None);
+        let payload = Report::Settings.payload(&a, &Env::default());
+        assert!(!payload.contains("s3cret") && !payload.contains("hunter2"));
+        assert!(payload.contains("mqtt_prefix"));
     }
 }

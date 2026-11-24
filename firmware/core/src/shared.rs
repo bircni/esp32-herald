@@ -40,7 +40,7 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 }
 
 impl Shared {
-    pub fn new(app: App, storage: Storage, firmware_slot: Option<String>) -> Self {
+    pub(crate) fn new(app: App, storage: Storage, firmware_slot: Option<String>) -> Self {
         Self {
             app: Mutex::new(app),
             net: Mutex::new(NetState::Offline),

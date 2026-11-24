@@ -14,6 +14,7 @@ use crate::{
     color::Color,
     de::format_float,
     gfx::{self, Align, Canvas, Font},
+    i18n::{Language, Text},
     model::Env,
     screen::{ChartStyle, Entry, GaugeStyle, Row, TextSize, Widget, Zone},
     theme::Theme,
@@ -24,16 +25,37 @@ const TITLE_H: i32 = 42;
 /// Content ends above the navigation dots.
 const BOTTOM: i32 = 300;
 
+/// Where a screen is laid out: the landscape TFT or the tall e-paper.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Area {
+    pub width: i32,
+    /// Content ends above this line.
+    pub bottom: i32,
+    /// Widgets stacked in one column instead of side by side.
+    pub portrait: bool,
+    /// Cards drawn as outlines (for black and white).
+    pub outlined: bool,
+}
+
+pub(crate) const LANDSCAPE: Area = Area {
+    width: 480,
+    bottom: BOTTOM,
+    portrait: false,
+    outlined: false,
+};
+
 const fn title_rect() -> Rectangle {
     gfx::rect(0, 0, 480, TITLE_H as u32)
 }
 
 /// Cells for `n` widgets as fractions of the area: 1 full, 2 side by side,
-/// 3 in a row, 4 as 2x2, 5-6 as 3x2; then inset like the web app.
-fn cells(n: usize, titled: bool) -> Vec<Rectangle> {
+/// 3 in a row, 4 as 2x2, 5-6 as 3x2 (in portrait, one widget per row);
+/// then inset like the web app.
+fn cells(area: Area, n: usize, titled: bool) -> Vec<Rectangle> {
     let top = if titled { TITLE_H } else { 8 };
-    let height = (BOTTOM - top) as f32;
+    let height = (area.bottom - top) as f32;
     let (cols, rows) = match n {
+        _ if area.portrait => (1, n.max(1)),
         0 | 1 => (1, 1),
         2 => (2, 1),
         3 => (3, 1),
@@ -43,7 +65,7 @@ fn cells(n: usize, titled: bool) -> Vec<Rectangle> {
     (0..n)
         .map(|i| {
             let (col, row) = (i % cols, i / cols);
-            let (col_w, row_h) = (480.0 / cols as f32, height / rows as f32);
+            let (col_w, row_h) = (area.width as f32 / cols as f32, height / rows as f32);
             gfx::rect(
                 (col as f32 * col_w).round() as i32 + 6,
                 top + (row as f32 * row_h).round() as i32 + 4,
@@ -114,7 +136,7 @@ fn live_key(app: &App, w: &Widget, env: &Env) -> i64 {
 
 pub(crate) fn regions(app: &App, slot: u8, env: &Env) -> Vec<Region> {
     let Some(entry) = app.screens.get(slot) else {
-        return vec![region(crate::model::screen(), &[-1])];
+        return vec![region(super::area(), &[-1])];
     };
     let titled = !entry.screen.title.is_empty();
     let theme_key = app.theme().key();
@@ -126,7 +148,7 @@ pub(crate) fn regions(app: &App, slot: u8, env: &Env) -> Vec<Region> {
         .screen
         .widgets
         .iter()
-        .zip(cells(entry.screen.widgets.len(), titled))
+        .zip(cells(LANDSCAPE, entry.screen.widgets.len(), titled))
         .enumerate()
     {
         regions.push(region(
@@ -141,17 +163,25 @@ pub(crate) fn paint(app: &App, slot: u8, c: &mut Canvas<'_>, env: &Env, theme: &
     let Some(entry) = app.screens.get(slot) else {
         return;
     };
-    paint_entry(app, entry, c, env, theme);
+    paint_entry(app, entry, c, env, theme, LANDSCAPE);
 }
 
-fn paint_entry(app: &App, entry: &Entry, c: &mut Canvas<'_>, env: &Env, theme: &Theme) {
+pub(crate) fn paint_entry(
+    app: &App,
+    entry: &Entry,
+    c: &mut Canvas<'_>,
+    env: &Env,
+    theme: &Theme,
+    area: Area,
+) {
     let screen = &entry.screen;
     let titled = !screen.title.is_empty();
     if titled {
+        let title = gfx::shorten(Font::Bold, &screen.title, area.width - 32);
         gfx::text(
             c,
             Font::Bold,
-            &screen.title,
+            &title,
             Point::new(16, 22),
             Align::Left,
             theme.fg,
@@ -160,13 +190,17 @@ fn paint_entry(app: &App, entry: &Entry, c: &mut Canvas<'_>, env: &Env, theme: &
     for (w, r) in screen
         .widgets
         .iter()
-        .zip(cells(screen.widgets.len(), titled))
+        .zip(cells(area, screen.widgets.len(), titled))
     {
         // Skip widgets outside the band being drawn.
         if r.intersection(&c.bounding_box()).is_zero_sized() {
             continue;
         }
-        gfx::round_rect(c, r, 8, theme.panel);
+        if area.outlined {
+            gfx::round_rect_outline(c, r, 8, 2, theme.fg);
+        } else {
+            gfx::round_rect(c, r, 8, theme.panel);
+        }
         widget(app, w, c, env, &Cell { r, theme });
     }
 }
@@ -366,9 +400,10 @@ fn widget(app: &App, widget: &Widget, c: &mut Canvas<'_>, env: &Env, cell: &Cell
             color,
         } => {
             cell.label(c, label);
-            let text = env
-                .unix_s
-                .map_or_else(|| "--:--".to_owned(), |now| countdown(until - now));
+            let text = env.unix_s.map_or_else(
+                || "--:--".to_owned(),
+                |now| countdown(until - now, app.lang()),
+            );
             cell.centered(c, &text, cy + 6, cell.big(), cell.color(*color, t.accent));
         }
         Widget::Text { text, color, size } => {
@@ -423,11 +458,11 @@ fn zone_color(zones: &[Zone], value: f32, theme: &Theme) -> Option<Rgb565> {
 
 /// As in the web app: `2d 4h`, `1:05` (hours and minutes) in the last day,
 /// `4:09` (minutes and seconds) in the last hour.
-fn countdown(left: i64) -> String {
+fn countdown(left: i64, lang: Language) -> String {
     let left = left.max(0);
     let (d, h, m, s) = (left / 86_400, left / 3600 % 24, left / 60 % 60, left % 60);
     if d > 0 {
-        format!("{d}d {h}h")
+        format!("{d}{} {h}h", lang.day_letter())
     } else if h > 0 {
         format!("{h}:{m:02}")
     } else {
@@ -572,7 +607,7 @@ fn weather(app: &App, c: &mut Canvas<'_>, cell: &Cell<'_>) {
     let t = cell.theme;
     let (cx, cy) = (cell.cx(), cell.cy());
     let Some(w) = &app.weather else {
-        cell.centered(c, "No weather", cy, 14.0, t.dim);
+        cell.centered(c, app.lang().text(Text::NoWeather), cy, 14.0, t.dim);
         return;
     };
     let size = (cell.h() as f32 * 0.38)
@@ -590,7 +625,13 @@ fn weather(app: &App, c: &mut Canvas<'_>, cell: &Cell<'_>) {
         Align::Left,
         t.fg,
     );
-    cell.centered(c, w.condition.label(), cy + size / 2 + 8, 13.0, t.dim);
+    cell.centered(
+        c,
+        app.lang().condition(w.condition),
+        cy + size / 2 + 8,
+        13.0,
+        t.dim,
+    );
 }
 
 #[cfg(test)]
@@ -601,7 +642,7 @@ mod tests {
     fn cells_tile_the_screen_without_overlap() {
         for n in 1..=6 {
             for titled in [false, true] {
-                let cs = cells(n, titled);
+                let cs = cells(LANDSCAPE, n, titled);
                 assert_eq!(cs.len(), n);
                 for (i, a) in cs.iter().enumerate() {
                     assert!(
@@ -618,10 +659,12 @@ mod tests {
 
     #[test]
     fn countdown_like_the_web_app() {
-        assert_eq!(countdown(-5), "0:00");
-        assert_eq!(countdown(65), "1:05");
-        assert_eq!(countdown(3_900), "1:05");
-        assert_eq!(countdown(90_000), "1d 1h");
+        let en = Language::En;
+        assert_eq!(countdown(-5, en), "0:00");
+        assert_eq!(countdown(65, en), "1:05");
+        assert_eq!(countdown(3_900, en), "1:05");
+        assert_eq!(countdown(90_000, en), "1d 1h");
+        assert_eq!(countdown(90_000, Language::De), "1T 1h");
     }
 
     #[test]
