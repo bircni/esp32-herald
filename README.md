@@ -110,7 +110,6 @@ with your prefix filled in.
 - [Development](docs/development.md): hardware, project layout, building,
   testing, releasing and design notes.
 - [Adding a board](docs/adding-a-board.md): what a new board needs.
-- [Changelog](CHANGELOG.md): what changed in each release.
 
 ## License
 

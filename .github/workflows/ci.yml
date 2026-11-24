@@ -4,12 +4,13 @@ on:
   push:
     branches:
       - main
-    # A version tag also publishes a release with the firmware images.
-    tags:
-      - "v*"
   pull_request:
     branches:
       - main
+  # A published release gets the firmware images attached.
+  release:
+    types:
+      - published
 
 jobs:
   check:
@@ -109,24 +110,21 @@ jobs:
           if-no-files-found: error
 
   release:
-    name: Release
-    if: startsWith(github.ref, 'refs/tags/v')
+    name: Release images
+    if: github.event_name == 'release'
     needs: [check, firmware-fmt, firmware]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v7
-      # The tag, both workspaces and the changelog must name the same version.
+      # The tag (v0.1.0) must name the version both workspaces are at.
       - name: check the version
         run: |
           v="${GITHUB_REF_NAME#v}"
           for f in Cargo.toml firmware/Cargo.toml; do
             grep -qx "version = \"$v\"" "$f" || { echo "::error::$f is not at $v"; exit 1; }
           done
-          awk -v v="$v" '$0 ~ "^## \\[" v "\\]" {on=1; next} /^## \[/ {on=0} on' \
-            CHANGELOG.md > notes.md
-          test -s notes.md || { echo "::error::CHANGELOG.md has no section for $v"; exit 1; }
           echo "VERSION=$v" >> "$GITHUB_ENV"
       - uses: actions/download-artifact@v8.0.2
         with:
@@ -141,7 +139,7 @@ jobs:
             cp "$dir/$board-full.bin" "dist/herald-$board-$VERSION-full.bin"
           done
           (cd dist && sha256sum * > SHA256SUMS)
-      - name: publish
+      - name: attach to the release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" --title "Herald $VERSION" --notes-file notes.md dist/*
+        run: gh release upload "$GITHUB_REF_NAME" dist/* --clobber
