@@ -79,17 +79,19 @@ Set your MQTT broker in the web app, then publish under the topic prefix
 
 | Topic | Payload |
 |---|---|
-| `herald/item/<id>` | `Front door open`, or JSON with `text`, `color`, `icon`, `since`, `ttl`, …; empty removes it |
-| `herald/screen/<name>` | a custom screen: title and widgets |
-| `herald/weather` | current weather and forecast, e.g. from a Home Assistant weather entity |
-| `herald/view` | `home`, `forecast`, `calendar` or a screen name |
+| `herald/data/item/<id>` | `Front door open`, or JSON with `text`, `color`, `icon`, `since`, `ttl`, …; empty removes it |
+| `herald/data/screen/<name>` | a custom screen: title and widgets |
+| `herald/data/weather` | current weather and forecast, e.g. from a Home Assistant weather entity |
+| `herald/cmd/screen` | `home`, `forecast`, `calendar` or a screen name |
 
 ```sh
-mosquitto_pub -h broker.lan -r -t herald/item/window.kitchen \
+mosquitto_pub -h broker.lan -r -t herald/data/item/window.kitchen \
   -m '{"text":"Kitchen window open","color":"red","icon":"window"}'
 ```
 
-The web app's Connections page lists every topic with your prefix filled in.
+Each display reports its status, state, settings and current screen under
+`herald/state/<hostname>/`. The web app's Connections page lists every topic
+with your prefix filled in.
 
 ## Documentation
 

@@ -9,22 +9,46 @@ the device connects; changes take effect within a second. HTTP keeps working
 alongside; both go through the same `Transport` trait
 (`crates/ui/src/command.rs`), so a message means the same thing either way.
 
+Topics come in three groups, so whatever goes to the device never shares a
+topic with what comes from it, and a sender does not get its own commands
+back as readings. Several displays can share one prefix: they all read
+`data` and `cmd`, and each reports under its own host name.
+
+Data, usually sent retained so the broker hands it over again after a restart:
+
 | Topic | Payload | Effect |
 |---|---|---|
-| `<prefix>/item/<id>` | item JSON, or plain text | Adds or replaces the item |
-| `<prefix>/item/<id>` | empty | Removes the item |
-| `<prefix>/screen/<name>` | screen JSON | Adds or replaces a custom screen; empty removes it |
-| `<prefix>/weather` | weather JSON, see [Weather](#weather) | Replaces the weather; empty removes it |
-| `<prefix>/view` | `home`, a screen name, or `{"view":"home"}` | Switches view and wakes the display |
-| `<prefix>/clear` | anything | Empties the feed |
-| `<prefix>/settings` | any subset of the settings | Validates and saves |
+| `<prefix>/data/item/<id>` | item JSON, or plain text | Adds or replaces the item |
+| `<prefix>/data/item/<id>` | empty | Removes the item |
+| `<prefix>/data/screen/<name>` | screen JSON | Adds or replaces a custom screen; empty removes it |
+| `<prefix>/data/weather` | weather JSON, see [Weather](#weather) | Replaces the weather; empty removes it |
 
-The device publishes:
+Commands, sent without retain:
 
-- `<prefix>/status`: `online`, retained; `offline` as last will;
-- `<prefix>/error`: when a message is rejected, `{topic, status, error,
-  payload}`, so the sender can see why (`mosquitto_sub -t '<prefix>/error'`);
-- `<prefix>/log`: the device's warnings and errors.
+| Topic | Payload | Effect |
+|---|---|---|
+| `<prefix>/cmd/screen` | `home`, a screen name, or `{"screen":"home"}` | Switches what the display shows and wakes it |
+| `<prefix>/cmd/clear` | anything | Empties the feed |
+| `<prefix>/cmd/settings` | any subset of the settings | Validates and saves |
+
+The device shows whatever arrives; it does not look at whether the broker
+kept a message. To remove an item for good, send the empty payload retained
+too, or the broker keeps handing out the old one.
+
+Each display publishes under `<prefix>/state/<hostname>/`:
+
+- `status`: `online`, retained; `offline` as last will. The only retained one.
+- `state`: version, view, network, number of items; when it changes.
+- `settings`: the settings without the token and MQTT password; when they
+  change.
+- `screen`: the name of the view or screen on the display; when it switches.
+- `error`: when a message is rejected, `{topic, status, error, payload}`, so
+  the sender can see why (`mosquitto_sub -t '<prefix>/state/+/error'`).
+- `log`: the device's warnings and errors.
+
+Nothing is published on a timer. After connecting, `state`, `settings` and
+`screen` go out once. Older versions used `<prefix>/state` and
+`<prefix>/status`; the device clears both on connecting.
 
 The HTTP token does not apply to MQTT; the broker's login does.
 
@@ -51,10 +75,10 @@ The feed holds up to 16 items in RAM; retained messages refill it after a
 restart.
 
 ```sh
-mosquitto_pub -h broker.lan -r -t herald/item/door -m 'Front door open'
-mosquitto_pub -h broker.lan -r -t herald/item/window.kitchen \
+mosquitto_pub -h broker.lan -r -t herald/data/item/door -m 'Front door open'
+mosquitto_pub -h broker.lan -r -t herald/data/item/window.kitchen \
   -m '{"text":"Kitchen window open","color":"#FF3B30","icon":"window","since":1795000000}'
-mosquitto_pub -h broker.lan -r -t herald/item/window.kitchen -n   # closed
+mosquitto_pub -h broker.lan -r -t herald/data/item/window.kitchen -n   # closed
 ```
 
 A Home Assistant automation for a window sensor:
@@ -66,7 +90,7 @@ triggers:
 actions:
   - action: mqtt.publish
     data:
-      topic: herald/item/window.kitchen
+      topic: herald/data/item/window.kitchen
       retain: true
       payload: >-
         {% if trigger.to_state.state == 'on' %}
@@ -112,7 +136,7 @@ actions:
     response_variable: daily
   - action: mqtt.publish
     data:
-      topic: herald/weather
+      topic: herald/data/weather
       retain: true
       payload: >-
         {% set w = 'weather.home' %}

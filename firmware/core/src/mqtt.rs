@@ -14,7 +14,7 @@ use anyhow::Result;
 use esp_idf_svc::mqtt::client::{
     Details, EspMqttClient, EventPayload, LwtConfiguration, MqttClientConfiguration, QoS,
 };
-use ui::mqtt::{Config, Message, OFFLINE, ONLINE, error_payload};
+use ui::mqtt::{Config, Message, OFFLINE, ONLINE, Reporter, error_payload};
 
 use crate::shared::Shared;
 
@@ -38,6 +38,7 @@ struct Running {
     /// callback cannot publish itself.
     errors: Arc<Mutex<Vec<String>>>,
     subscribed: bool,
+    reporter: Reporter,
 }
 
 impl MqttLink {
@@ -50,7 +51,7 @@ impl MqttLink {
     }
 
     /// Call regularly from the network thread: applies settings changes,
-    /// subscribes after (re)connecting and publishes the state.
+    /// subscribes after (re)connecting and publishes what changed.
     pub fn poll(&mut self, shared: &Arc<Shared>) {
         let wanted = Config::from_settings(shared.app().settings());
         if self.running.as_ref().map(|r| &r.config) != wanted.as_ref() {
@@ -75,10 +76,11 @@ impl MqttLink {
                 Ok(()) => {
                     log::info!("MQTT connected to {}", r.config.url());
                     r.subscribed = true;
-                    // Older versions kept their state there, retained.
-                    let topic = r.config.old_state_topic();
-                    if let Err(e) = r.client.enqueue(&topic, QoS::AtLeastOnce, true, &[]) {
-                        log::warn!("MQTT clearing {topic} failed: {e}");
+                    r.reporter.reset();
+                    for topic in r.config.old_topics() {
+                        if let Err(e) = r.client.enqueue(&topic, QoS::AtLeastOnce, true, &[]) {
+                            log::warn!("MQTT clearing {topic} failed: {e}");
+                        }
                     }
                 }
                 Err(e) => log::warn!("MQTT subscribe failed: {e:#}"),
@@ -116,6 +118,17 @@ impl MqttLink {
                 .enqueue(&topic, QoS::AtMostOnce, false, report.as_bytes())
             {
                 log::warn!("MQTT error report failed: {e}");
+            }
+        }
+        let env = shared.env();
+        let due = r.reporter.due(&shared.app(), &env);
+        for (report, payload) in due {
+            let topic = r.config.report_topic(report);
+            if let Err(e) = r
+                .client
+                .enqueue(&topic, QoS::AtMostOnce, false, payload.as_bytes())
+            {
+                log::warn!("MQTT publish of {topic} failed: {e}");
             }
         }
     }
@@ -219,6 +232,7 @@ impl Running {
             connected,
             errors,
             subscribed: false,
+            reporter: Reporter::default(),
         })
     }
 

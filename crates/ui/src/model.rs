@@ -182,7 +182,7 @@ pub struct Settings {
     pub mqtt_port: u16,
     pub mqtt_user: String,
     pub mqtt_password: String,
-    /// Topic prefix, e.g. `herald` for `herald/item/<id>`.
+    /// Topic prefix, e.g. `herald` for `herald/data/item/<id>`.
     pub mqtt_prefix: String,
 }
 
@@ -618,7 +618,7 @@ pub enum Effect {
         ssid: String,
         password: String,
     },
-    /// Publish a custom screen retained on `<prefix>/screen/<name>`, so the
+    /// Publish a custom screen retained on `<prefix>/data/screen/<name>`, so the
     /// broker keeps it; `None` clears it. Only for screens that came in
     /// over HTTP: those from MQTT are already on the broker.
     PublishScreen {

@@ -613,6 +613,7 @@ impl MqttConnection {
         let transport = config.transport();
         let topics = config.subscriptions();
         let status = config.status_topic();
+        let old_topics = config.old_topics();
         let error_topic = config.error_topic();
         let url = config.url();
         thread::spawn(move || {
@@ -633,6 +634,14 @@ impl MqttConnection {
                             true,
                             ui::mqtt::ONLINE,
                         );
+                        for topic in &old_topics {
+                            let _ = subscriber.try_publish(
+                                topic.as_str(),
+                                QoS::AtLeastOnce,
+                                true,
+                                Vec::new(),
+                            );
+                        }
                     }
                     Ok(Event::Incoming(Packet::Publish(p))) => {
                         let env = shared.env();
@@ -684,10 +693,11 @@ impl MqttConnection {
 }
 
 /// Follows the MQTT settings, like the firmware's network thread does, and
-/// publishes the state.
+/// publishes what changed.
 fn run_mqtt(shared: Arc<Shared>) {
     thread::spawn(move || {
         let mut current: Option<MqttConnection> = None;
+        let mut reporter = ui::mqtt::Reporter::default();
         loop {
             let wanted = ui::mqtt::Config::from_settings(
                 shared
@@ -706,6 +716,9 @@ fn run_mqtt(shared: Arc<Shared>) {
                 .as_ref()
                 .map(|c| c.connected.load(Ordering::Relaxed));
             *shared.mqtt.lock().unwrap_or_else(PoisonError::into_inner) = connected;
+            if connected != Some(true) {
+                reporter.reset();
+            }
             if let (Some(c), Some(true)) = (&current, connected) {
                 let qos = rumqttc::QoS::AtLeastOnce;
                 let outbox = std::mem::take(
@@ -719,6 +732,17 @@ fn run_mqtt(shared: Arc<Shared>) {
                 }
                 for line in ui::logbuf::take_pending() {
                     let _ = c.client.try_publish(c.config.log_topic(), qos, false, line);
+                }
+                let env = shared.env();
+                let due = reporter.due(
+                    &shared.app.lock().unwrap_or_else(PoisonError::into_inner),
+                    &env,
+                );
+                for (report, payload) in due {
+                    let topic = c.config.report_topic(report);
+                    let _ = c
+                        .client
+                        .try_publish(topic, rumqttc::QoS::AtMostOnce, false, payload);
                 }
             }
             thread::sleep(Duration::from_secs(1));

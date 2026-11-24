@@ -511,11 +511,11 @@ function renderOverview(){
 }
 function renderFeed(){
   const it=S.items||[];$("f-count").textContent=it.length?it.length+(it.length===1?" item":" items"):"";
-  $("f-topic").textContent=(S.mqtt_prefix||"herald")+"/item/<id>";
+  $("f-topic").textContent=(S.mqtt_prefix||"herald")+"/data/item/<id>";
   $("f-list").innerHTML=it.length?it.map(i=>{const c=col(i.color)||COLORS.grey;return`<li>${i.icon&&IC[i.icon]?`<span class="ic">${svg(IC[i.icon],18,c)}</span>`:`<span class="sw" style="background:${c}"></span>`}<div class="grow"><div class="t">${esc(i.text)}</div><div class="sub">${esc(i.id)}, ${i.detail?esc(i.detail)+", ":""}${i.age_s<60?"just now":ageStr(i.age_s)+" ago"}${i.remaining_s!=null?", disappears in "+ageStr(i.remaining_s).replace("now","under a minute"):""}</div></div><button class="icon" data-del="${esc(i.id)}" aria-label="Remove ${esc(i.text)}">&times;</button></li>`}).join(""):'<li class="empty">Nothing in the feed. Items appear here when another system sends them.</li>';
 }
 function renderScreensList(){
-  $("s-topic").textContent=(S.mqtt_prefix||"herald")+"/screen/<name>";
+  $("s-topic").textContent=(S.mqtt_prefix||"herald")+"/data/screen/<name>";
   const names=Object.keys(screens).sort(),key=JSON.stringify(screens);if($("s-list").dataset.k===key)return;$("s-list").dataset.k=key;
   $("s-list").innerHTML=names.length?names.map(n=>{const s=screens[n]||{},k=(s.widgets||[]).length;return`<li><div class="grow"><div class="t">${esc(s.title||n)}</div><div class="sub">${esc(n)}, ${k} ${k===1?"widget":"widgets"}${s.lifetime?", disappears after "+s.lifetime+" s without an update":""}</div></div><button data-show="${esc(n)}">Show</button><button data-edit="${esc(n)}">Edit</button><button class="icon danger" data-sdel="${esc(n)}" aria-label="Delete ${esc(n)}">&times;</button></li>`}).join(""):'<li class="empty">No screens yet. Create one here, or publish one over MQTT.</li>';
 }
@@ -530,21 +530,25 @@ async function loadLog(){try{const r=await fetch("/api/log",{headers:hdr()}),t=a
 // Topic reference
 let refKey="";
 function renderRef(){
-  const p=S.mqtt_prefix||"herald",h=(settings&&settings.mqtt_host)||"BROKER";if(refKey===p+h)return;refKey=p+h;
-  const P=esc(p),H=esc(h),row=(t,pl,e)=>`<tr><td><code>${P}/${t}</code></td><td>${pl}</td><td>${e}</td></tr>`;
-  $("ref").innerHTML=`<p class="muted">With your prefix <code>${P}</code>. Send states, such as an open window, as retained messages so they come back after a restart.</p>
+  const p=S.mqtt_prefix||"herald",h=(settings&&settings.mqtt_host)||"BROKER",n=S.hostname||"herald";if(refKey===p+h+n)return;refKey=p+h+n;
+  const P=esc(p),H=esc(h),N=esc(n),row=(t,pl,e)=>`<tr><td><code>${P}/${t}</code></td><td>${pl}</td><td>${e}</td></tr>`;
+  $("ref").innerHTML=`<p class="muted">With your prefix <code>${P}</code>. Every display on this prefix reads <code>data</code> and <code>cmd</code>; each reports under <code>state/</code> and its host name, so commands never come back as readings. Send data, such as an open window, as retained messages so it comes back after a restart; send commands not retained.</p>
 <div class="tbl"><table><tr><th>Topic</th><th>Payload</th><th>Effect</th></tr>
-${row("item/&lt;id&gt;","text, or item JSON","adds or updates the item; empty removes it")}
-${row("clear","anything","empties the feed")}
-${row("screen/&lt;name&gt;","screen JSON","adds or updates a screen; empty removes it")}
-${row("weather","weather JSON","replaces the weather; empty removes it")}
-${row("view","<code>home</code>, <code>forecast</code>, <code>calendar</code> or a screen name","switches the view")}
-${row("settings","any settings, e.g. <code>{\"rotate\":true}</code>","changes only those settings")}
-<tr><th colspan="3">Published by the device</th></tr>
-${row("status","<code>online</code> or <code>offline</code>","retained; offline is the last will")}
-${row("state","state JSON","retained, on every change and once a minute")}
-${row("error","<code>{topic, status, error, payload}</code>","why a message was rejected")}
-${row("log","text","warnings and errors from the device")}
+<tr><th colspan="3">Data, usually retained</th></tr>
+${row("data/item/&lt;id&gt;","text, or item JSON","adds or updates the item; empty removes it")}
+${row("data/screen/&lt;name&gt;","screen JSON","adds or updates a screen; empty removes it")}
+${row("data/weather","weather JSON","replaces the weather; empty removes it")}
+<tr><th colspan="3">Commands, not retained</th></tr>
+${row("cmd/clear","anything","empties the feed")}
+${row("cmd/screen","<code>home</code>, <code>forecast</code>, <code>calendar</code> or a screen name","switches what the display shows")}
+${row("cmd/settings","any settings, e.g. <code>{\"rotate\":true}</code>","changes only those settings")}
+<tr><th colspan="3">Published by this display</th></tr>
+${row(`state/${N}/status`,"<code>online</code> or <code>offline</code>","retained; offline is the last will")}
+${row(`state/${N}/state`,"state JSON","when it changes")}
+${row(`state/${N}/settings`,"settings JSON, without passwords","when they change")}
+${row(`state/${N}/screen`,"view or screen name","when the display switches")}
+${row(`state/${N}/error`,"<code>{topic, status, error, payload}</code>","why a message was rejected")}
+${row(`state/${N}/log`,"text","warnings and errors")}
 </table></div>
 <h3>Item</h3><p class="muted small">Plain text works, or JSON where only <code>text</code> is needed. Colour: <code>red</code>, <code>yellow</code>, <code>blue</code>, <code>green</code>, <code>grey</code>, <code>#RRGGBB</code> or <code>[r,g,b]</code>. <code>since</code> is the Unix time the state began, <code>age</code> how long it has lasted, <code>ttl</code> removes it after that many seconds.</p>
 <pre><code>{"text": "Kitchen window open", "color": "red", "icon": "window",
@@ -560,8 +564,8 @@ ${row("log","text","warnings and errors from the device")}
  "hourly": [{"hour": 17, "temp": 3.9, "rain": 40, "condition": "rainy"}],
  "daily": [{"date": "2026-11-22", "min": 1, "max": 6, "condition": "cloudy"}]}</code></pre>
 <h3>From the command line</h3>
-<pre><code>mosquitto_pub -h ${H} -r -t ${P}/item/window.kitchen -m "Kitchen window open"
-mosquitto_pub -h ${H} -r -t ${P}/item/window.kitchen -n      # closed
+<pre><code>mosquitto_pub -h ${H} -r -t ${P}/data/item/window.kitchen -m "Kitchen window open"
+mosquitto_pub -h ${H} -r -t ${P}/data/item/window.kitchen -n      # closed
 mosquitto_sub -h ${H} -t '${P}/#' -v                         # watch everything</code></pre>
 <h3>Home Assistant: a window</h3>
 <pre><code>alias: Herald kitchen window
@@ -571,7 +575,7 @@ triggers:
 actions:
   - action: mqtt.publish
     data:
-      topic: ${P}/item/window.kitchen
+      topic: ${P}/data/item/window.kitchen
       retain: true
       payload: &gt;-
         {% if trigger.to_state.state == 'on' %}
@@ -596,7 +600,7 @@ actions:
     response_variable: daily
   - action: mqtt.publish
     data:
-      topic: ${P}/weather
+      topic: ${P}/data/weather
       retain: true
       payload: &gt;-
         {% set w = 'weather.home' %}

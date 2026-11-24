@@ -67,7 +67,7 @@ it for `sleep_secs` (at least 30 s); a touch on a dark screen only wakes it.
 
 ![A custom screen with window and door icons, a grid of temperatures and a countdown](images/screen-house.png)
 
-A screen is a retained MQTT message on `<prefix>/screen/<name>` (or
+A screen is a retained MQTT message on `<prefix>/data/screen/<name>` (or
 `PUT /api/screens/<name>`), with an optional title and 1 to 6 widgets laid out
 automatically: 1 full, 2 side by side, 3 in a row, 4 as 2x2, 5–6 as 3x2. Up to
 8 screens, 4 KB each; `lifetime` (seconds) removes a screen that is not
